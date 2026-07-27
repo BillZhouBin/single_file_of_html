@@ -155,6 +155,16 @@
   .play-btn:hover { background: #ffdf66; transform: translateY(-2px); }
   .play-btn:active { transform: translateY(0); }
 
+  /* 在线试玩提示（部署后的域名） */
+  .play-hint {
+    align-self: flex-start;
+    font-family: var(--font-pixel); font-size: 9px;
+    color: var(--cyan); text-decoration: none;
+    opacity: 0.85;
+    transition: opacity var(--t, 200ms) ease;
+  }
+  .play-hint:hover { opacity: 1; text-decoration: underline; }
+
   /* Focus visibility — 可访问性 */
   a:focus-visible, .play-btn:focus-visible {
     outline: 3px solid var(--cyan);
@@ -237,6 +247,7 @@
         <p>珊瑚橙战机 vs 三色敌机。含 Boss 三阶段 + 蓄力激光、连击分数倍率。键盘 + 触摸双输入，竖屏优先。</p>
         <span class="badge"><span class="b-dot" aria-hidden="true"></span>✅ 可玩 PLAYABLE</span>
         <a class="play-btn" href="./plane-game/plane-war-game.html">▶ 开始游戏</a>
+        <a class="play-hint" href="https://game.xzz.cloud-ip.cc/plane-game/plane-war-game.html" rel="noopener">↗ 在线试玩 · game.xzz.cloud-ip.cc</a>
       </article>
 
       <!-- 占位：未来扩展 -->
