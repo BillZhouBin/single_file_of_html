@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>单文件小游戏合集 · Single-File HTML Games</title>
+<meta name="description" content="零构建、零依赖的纯前端像素小游戏集合。每个游戏都是自包含的 HTML 文件，双击即玩。">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap" rel="stylesheet">
+<style>
+  :root {
+    /* Color tokens — 与 plane-war-game 调色板对齐 */
+    --bg-space:      #0a0d1f;
+    --bg-panel:      #121634;
+    --bg-panel-2:    #1a1f47;
+    --line:          #2a2f5e;
+    --text:          #e6e9f5;
+    --text-dim:      #9aa0c8;
+    --coral:         #ff6b5e;
+    --coral-deep:    #c43e34;
+    --gold:          #ffd23f;
+    --cyan:          #9be7ff;
+    --magenta:       #ff4d9d;
+    --green:         #5ee6a0;
+
+    --font-pixel: 'Press Start 2P', ui-monospace, monospace;
+    --font-read:  'VT323', ui-monospace, monospace;
+
+    --space-1: 4px;  --space-2: 8px;  --space-3: 12px;
+    --space-4: 16px; --space-6: 24px; --space-8: 32px; --space-12: 48px;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body { margin: 0; padding: 0; }
+
+  body {
+    background:
+      radial-gradient(1200px 600px at 50% -10%, #1a1f47 0%, transparent 60%),
+      var(--bg-space);
+    color: var(--text);
+    font-family: var(--font-read);
+    font-size: 22px;
+    line-height: 1.5;
+    min-height: 100vh;
+    -webkit-font-smoothing: none;
+    image-rendering: pixelated;
+  }
+
+  /* 顶部状态条 */
+  .topbar {
+    border-bottom: 2px solid var(--line);
+    background: linear-gradient(180deg, #0e1230, #0a0d1f);
+  }
+  .topbar-inner {
+    max-width: 960px; margin: 0 auto;
+    padding: var(--space-3) var(--space-4);
+    display: flex; align-items: center; gap: var(--space-3);
+    font-family: var(--font-pixel); font-size: 11px; color: var(--text-dim);
+  }
+  .topbar .dot { width: 10px; height: 10px; background: var(--green); border-radius: 2px;
+    box-shadow: 0 0 8px var(--green); }
+
+  .container { max-width: 960px; margin: 0 auto; padding: var(--space-12) var(--space-4); }
+
+  /* Hero */
+  .hero { text-align: center; margin-bottom: var(--space-12); }
+  .hero h1 {
+    font-family: var(--font-pixel);
+    font-size: clamp(18px, 4.5vw, 34px);
+    line-height: 1.4;
+    margin: 0 0 var(--space-4);
+    color: var(--text);
+    text-shadow: 3px 3px 0 var(--coral-deep);
+  }
+  .hero .accent { color: var(--gold); }
+  .hero p {
+    color: var(--text-dim);
+    font-size: 22px;
+    max-width: 620px; margin: 0 auto;
+  }
+
+  /* Section title */
+  .section-title {
+    font-family: var(--font-pixel); font-size: 13px; color: var(--cyan);
+    margin: 0 0 var(--space-6);
+    display: flex; align-items: center; gap: var(--space-3);
+  }
+  .section-title::after { content: ""; flex: 1; height: 2px; background: var(--line); }
+
+  /* Game grid */
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: var(--space-6);
+  }
+
+  .card {
+    background: var(--bg-panel);
+    border: 2px solid var(--line);
+    border-radius: 10px;
+    padding: var(--space-6);
+    display: flex; flex-direction: column; gap: var(--space-4);
+    transition: transform var(--t, 200ms) ease, border-color var(--t, 200ms) ease, box-shadow var(--t, 200ms) ease;
+  }
+  .card:hover {
+    transform: translateY(-4px);
+    border-color: var(--coral);
+    box-shadow: 0 10px 24px -8px rgba(255,107,94,0.35);
+  }
+
+  .card-head { display: flex; align-items: center; gap: var(--space-4); }
+  .sprite {
+    width: 64px; height: 64px; flex: none;
+    background: var(--bg-panel-2);
+    border: 2px solid var(--line);
+    border-radius: 8px;
+    display: grid; place-items: center;
+    image-rendering: pixelated;
+  }
+  .sprite svg { width: 44px; height: 44px; image-rendering: pixelated; }
+
+  .card h3 {
+    font-family: var(--font-pixel); font-size: 13px; margin: 0 0 var(--space-1);
+    color: var(--text); line-height: 1.5;
+  }
+  .tag {
+    display: inline-block; font-family: var(--font-pixel); font-size: 9px;
+    color: var(--text-dim); background: var(--bg-panel-2);
+    border: 1px solid var(--line); border-radius: 4px;
+    padding: 3px 6px;
+  }
+
+  .card p { margin: 0; color: var(--text-dim); font-size: 20px; line-height: 1.45; }
+
+  .badge {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-family: var(--font-pixel); font-size: 9px;
+    color: var(--green);
+  }
+  .badge .b-dot { width: 8px; height: 8px; background: var(--green); border-radius: 2px;
+    box-shadow: 0 0 6px var(--green); }
+
+  .play-btn {
+    margin-top: auto;
+    display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2);
+    font-family: var(--font-pixel); font-size: 11px;
+    color: #1a0e0c; background: var(--gold);
+    border: 2px solid #b8932a; border-radius: 6px;
+    padding: var(--space-3) var(--space-4);
+    text-decoration: none; cursor: pointer;
+    transition: transform var(--t, 200ms) ease, background var(--t, 200ms) ease;
+  }
+  .play-btn:hover { background: #ffdf66; transform: translateY(-2px); }
+  .play-btn:active { transform: translateY(0); }
+
+  /* Focus visibility — 可访问性 */
+  a:focus-visible, .play-btn:focus-visible {
+    outline: 3px solid var(--cyan);
+    outline-offset: 3px;
+  }
+
+  /* Empty / coming-soon slot */
+  .card--soon { opacity: 0.55; border-style: dashed; }
+  .card--soon .play-btn {
+    background: var(--bg-panel-2); color: var(--text-dim);
+    border-color: var(--line); cursor: not-allowed; pointer-events: none;
+  }
+
+  footer {
+    border-top: 2px solid var(--line);
+    margin-top: var(--space-12);
+    padding: var(--space-6) var(--space-4);
+    text-align: center;
+    color: var(--text-dim);
+    font-size: 18px;
+  }
+  footer .sig { color: var(--coral); font-family: var(--font-pixel); font-size: 10px; }
+
+  /* 尊重用户的减少动效偏好 */
+  @media (prefers-reduced-motion: reduce) {
+    * { transition: none !important; }
+    .topbar .dot, .badge .b-dot { box-shadow: none !important; }
+  }
+</style>
+</head>
+<body>
+  <div class="topbar">
+    <div class="topbar-inner">
+      <span class="dot" aria-hidden="true"></span>
+      <span>SINGLE-FILE HTML GAMES</span>
+    </div>
+  </div>
+
+  <main class="container">
+    <section class="hero">
+      <h1>单文件小游戏<span class="accent">合集</span></h1>
+      <p>零构建 · 零依赖的纯前端像素游戏。每个游戏都是一个自包含的 HTML 文件，双击即玩——没有打包、没有本地服务器、没有 npm install。</p>
+    </section>
+
+    <h2 class="section-title">游戏索引 · GAME INDEX</h2>
+
+    <section class="grid" aria-label="游戏列表">
+      <!-- 像素飞机大战 -->
+      <article class="card">
+        <div class="card-head">
+          <div class="sprite" aria-hidden="true">
+            <!-- 像素战机（与游戏调色板一致） -->
+            <svg viewBox="0 0 11 11" shape-rendering="crispEdges" role="img" aria-label="像素战机">
+              <rect x="5" y="0" width="1" height="2" fill="#c43e34"/>
+              <rect x="4" y="2" width="3" height="1" fill="#ff6b5e"/>
+              <rect x="4" y="3" width="1" height="1" fill="#c43e34"/>
+              <rect x="5" y="3" width="1" height="1" fill="#ffd23f"/>
+              <rect x="6" y="3" width="1" height="1" fill="#ff6b5e"/>
+              <rect x="0" y="4" width="1" height="3" fill="#ff6b5e"/>
+              <rect x="1" y="4" width="2" height="1" fill="#c43e34"/>
+              <rect x="1" y="5" width="1" height="1" fill="#ffd23f"/>
+              <rect x="1" y="6" width="2" height="1" fill="#ff6b5e"/>
+              <rect x="3" y="4" width="5" height="1" fill="#ff6b5e"/>
+              <rect x="4" y="5" width="3" height="1" fill="#c43e34"/>
+              <rect x="3" y="6" width="5" height="1" fill="#ff6b5e"/>
+              <rect x="9" y="4" width="1" height="3" fill="#ff6b5e"/>
+              <rect x="8" y="4" width="2" height="1" fill="#c43e34"/>
+              <rect x="8" y="5" width="1" height="1" fill="#ffd23f"/>
+              <rect x="8" y="6" width="2" height="1" fill="#ff6b5e"/>
+              <rect x="4" y="7" width="3" height="1" fill="#c43e34"/>
+              <rect x="5" y="8" width="1" height="2" fill="#ff6b5e"/>
+              <rect x="4" y="9" width="3" height="1" fill="#ffd23f"/>
+            </svg>
+          </div>
+          <div>
+            <h3>像素飞机大战</h3>
+            <span class="tag">纵版射击 · SHMUP</span>
+          </div>
+        </div>
+        <p>珊瑚橙战机 vs 三色敌机。含 Boss 三阶段 + 蓄力激光、连击分数倍率。键盘 + 触摸双输入，竖屏优先。</p>
+        <span class="badge"><span class="b-dot" aria-hidden="true"></span>✅ 可玩 PLAYABLE</span>
+        <a class="play-btn" href="./plane-game/plane-war-game.html">▶ 开始游戏</a>
+      </article>
+
+      <!-- 占位：未来扩展 -->
+      <article class="card card--soon">
+        <div class="card-head">
+          <div class="sprite" aria-hidden="true">
+            <svg viewBox="0 0 11 11" shape-rendering="crispEdges" role="img" aria-label="待添加">
+              <rect x="3" y="3" width="5" height="5" fill="#2a2f5e"/>
+              <rect x="4" y="4" width="3" height="3" fill="#3a3f7e"/>
+            </svg>
+          </div>
+          <div>
+            <h3>下一个游戏</h3>
+            <span class="tag">SOON</span>
+          </div>
+        </div>
+        <p>按合集约定新增：kebab-case 文件夹 + 单文件 HTML + 设计系统文档。索引会自动扩展。</p>
+        <span class="badge" style="color:var(--text-dim)"><span class="b-dot" style="background:var(--text-dim);box-shadow:none" aria-hidden="true"></span>🚧 筹备中</span>
+        <span class="play-btn">＋ 敬请期待</span>
+      </article>
+    </section>
+  </main>
+
+  <footer>
+    <p>保持联网以加载像素字体（Google Fonts CDN），离线自动回退 monospace，不影响游玩。</p>
+    <p class="sig">UI DESIGNER · 像素君</p>
+  </footer>
+</body>
+</html>
