@@ -32,7 +32,7 @@
     box-shadow:0 0 0 2px #0c1322, 0 12px 40px -12px #000a;
     overflow:hidden;
   }
-  canvas{ width:100%; height:100%; display:block; image-rendering:pixelated; background:#243a5e; }
+  canvas{ width:100%; height:100%; display:block; image-rendering:pixelated; background:#243a5e; touch-action:none; -webkit-user-select:none; user-select:none; }
 
   /* ── HUD ── */
   .hud{ position:absolute; inset:0; pointer-events:none; font-family:var(--font-mono); }
@@ -326,10 +326,25 @@
   });
   window.addEventListener('keyup', e=>{ keys[e.key]=false; });
 
-  let dragX = null;
-  cv.addEventListener('pointerdown', e=>{ dragX = toLogicalX(e.clientX); });
-  cv.addEventListener('pointermove', e=>{ if(dragX!==null) dragX = toLogicalX(e.clientX); });
-  window.addEventListener('pointerup', ()=>{ dragX=null; });
+  let dragId = null, dragX = null;
+  cv.addEventListener('pointerdown', e=>{
+    dragId = e.pointerId;
+    try { cv.setPointerCapture(e.pointerId); } catch(_) {}
+    dragX = toLogicalX(e.clientX);
+    e.preventDefault();
+  });
+  cv.addEventListener('pointermove', e=>{
+    if(dragX!==null && e.pointerId===dragId){
+      dragX = toLogicalX(e.clientX);
+      e.preventDefault();
+    }
+  });
+  function endDrag(e){
+    if(e && e.pointerId!==undefined && e.pointerId!==dragId) return;
+    dragX=null; dragId=null;
+  }
+  cv.addEventListener('pointerup', endDrag);
+  cv.addEventListener('pointercancel', endDrag);
   function toLogicalX(clientX){
     const r = cv.getBoundingClientRect();
     return (clientX - r.left) / r.width * W;
