@@ -1,0 +1,576 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>热气球大冒险 · Hot Air Balloon</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --sky-top:#243a5e; --sky-mid:#3a5680; --sky-bot:#5a78a0;
+    --text:#f4ecff; --text-dim:#b9c2d6; --ui-accent:#ffd23f;
+    --ui-danger:#ff5e5e; --border:#6b5ca8; --panel:#16203acc;
+    --font-display:'Press Start 2P','Courier New',monospace;
+    --font-mono:'VT323','Courier New',monospace;
+  }
+  *{box-sizing:border-box; margin:0; padding:0;}
+  html,body{height:100%;}
+  body{
+    background:#0c1322; color:var(--text);
+    font-family:var(--font-mono);
+    display:flex; align-items:center; justify-content:center;
+    min-height:100vh; overflow:hidden;
+    -webkit-font-smoothing:none; image-rendering:pixelated;
+  }
+  .game-shell{
+    position:relative;
+    width:min(100vw, calc(100vh * 270 / 480));
+    aspect-ratio:270 / 480;
+    margin:auto;
+    box-shadow:0 0 0 2px #0c1322, 0 12px 40px -12px #000a;
+    overflow:hidden;
+  }
+  canvas{ width:100%; height:100%; display:block; image-rendering:pixelated; background:#243a5e; }
+
+  /* ── HUD ── */
+  .hud{ position:absolute; inset:0; pointer-events:none; font-family:var(--font-mono); }
+  .hud-top{
+    position:absolute; top:0; left:0; right:0;
+    display:flex; align-items:center; justify-content:space-between;
+    padding:10px 12px; gap:8px;
+    background:linear-gradient(#0c1322cc, #0c132200);
+  }
+  .hud-top .score, .hud-top .best{ font-size:18px; letter-spacing:1px; }
+  .hud-top .best{ color:var(--text-dim); }
+  .pause-btn{
+    pointer-events:auto; cursor:pointer;
+    width:40px; height:40px; flex:none;
+    display:grid; place-items:center;
+    background:var(--panel); border:2px solid var(--border); border-radius:6px;
+    color:var(--text); font-family:var(--font-display); font-size:12px;
+  }
+  .pause-btn:focus-visible{ outline:3px solid #9be7ff; outline-offset:2px; }
+  .effects{
+    position:absolute; left:0; right:0; top:54px;
+    display:flex; flex-wrap:wrap; gap:6px; padding:0 12px;
+    justify-content:flex-start;
+  }
+  .chip{
+    display:flex; align-items:center; gap:6px;
+    background:var(--panel); border:1px solid var(--border); border-radius:5px;
+    padding:3px 6px; font-size:13px;
+  }
+  .chip .dot{ width:10px; height:10px; border-radius:2px; flex:none; }
+  .chip .bar{ width:26px; height:4px; background:#0006; border-radius:2px; overflow:hidden; }
+  .chip .bar > i{ display:block; height:100%; background:currentColor; }
+
+  /* ── Overlays ── */
+  .overlay{
+    position:absolute; inset:0; pointer-events:auto;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    gap:18px; padding:24px; text-align:center;
+    background:rgba(10,16,30,.72); backdrop-filter:blur(1px);
+  }
+  .overlay.hidden{ display:none; }
+  .title{
+    font-family:var(--font-display); font-size:clamp(14px,5vw,22px); line-height:1.5;
+    color:#9be7ff; text-shadow:2px 2px 0 #15181f;
+  }
+  .subtitle{ font-size:18px; color:var(--text-dim); max-width:280px; line-height:1.3; }
+  .big{ font-family:var(--font-display); font-size:20px; color:var(--ui-danger); }
+  .stat{ font-size:22px; }
+  .stat b{ color:var(--ui-accent); }
+  .btn{
+    pointer-events:auto; cursor:pointer; user-select:none;
+    font-family:var(--font-display); font-size:11px;
+    padding:14px 22px; border-radius:6px; border:2px solid #b8932a;
+    background:var(--ui-accent); color:#15181f; text-decoration:none;
+    transition:transform .15s ease, box-shadow .15s ease;
+  }
+  .btn:hover{ transform:translateY(-2px); box-shadow:0 6px 0 -2px #00000055; }
+  .btn:active{ transform:translateY(0); }
+  .btn--ghost{ background:transparent; border:1px solid var(--border); color:var(--text); }
+  .btn:focus-visible{ outline:3px solid #9be7ff; outline-offset:2px; }
+  .row{ display:flex; gap:12px; flex-wrap:wrap; justify-content:center; }
+
+  @media (prefers-reduced-motion: reduce){
+    *{ transition:none !important; }
+  }
+</style>
+</head>
+<body>
+  <div class="game-shell" id="shell">
+    <canvas id="game" width="270" height="480"></canvas>
+
+    <div class="hud">
+      <div class="hud-top">
+        <div class="score" id="score">SCORE 000000</div>
+        <button class="pause-btn" id="pauseBtn" aria-label="暂停">❚❚</button>
+        <div class="best" id="best">BEST 0</div>
+      </div>
+      <div class="effects" id="effects"></div>
+    </div>
+
+    <!-- 主菜单 -->
+    <div class="overlay" id="menu">
+      <div class="title">热气球大冒险</div>
+      <div class="subtitle">← → / 拖动 左右移动 · 吃彩色闪电变色无敌 · 吃宝石得分 · 躲开钢灰栅栏</div>
+      <button class="btn" id="startBtn">开始游戏</button>
+    </div>
+
+    <!-- 暂停 -->
+    <div class="overlay hidden" id="pause">
+      <div class="title">已暂停</div>
+      <div class="row">
+        <button class="btn" id="resumeBtn">继续</button>
+        <button class="btn btn--ghost" id="restartBtn1">重新开始</button>
+        <button class="btn btn--ghost" id="menuBtn1">返回菜单</button>
+      </div>
+    </div>
+
+    <!-- 结束 -->
+    <div class="overlay hidden" id="over">
+      <div class="big">GAME OVER</div>
+      <div class="stat">本局分数 <b id="finalScore">0</b></div>
+      <div class="stat">最高分 <b id="finalBest">0</b></div>
+      <div class="row">
+        <button class="btn" id="againBtn">再来一局</button>
+        <button class="btn btn--ghost" id="menuBtn2">返回菜单</button>
+      </div>
+    </div>
+  </div>
+
+<script>
+"use strict";
+(function(){
+  const W = 270, H = 480;
+  const cv = document.getElementById('game');
+  const ctx = cv.getContext('2d');
+  ctx.imageSmoothingEnabled = false;
+
+  // ── 调色 ──
+  const HUES = ['#3fd9c9', '#ff4d9d', '#ffd23f', '#5ee6a0'];
+  const GEMS = ['#3fd9c9', '#ffd23f', '#ff6b5e'];
+  const PU = {
+    shield:  { color:'#9be7ff', label:'护盾' },
+    slow:    { color:'#b56bff', label:'缓降' },
+    magnet:  { color:'#ff8a3d', label:'吸铁' },
+    double:  { color:'#ffd23f', label:'双倍' },
+  };
+  const PU_KEYS = Object.keys(PU);
+
+  function shade(hex, f){ // 压暗 f∈(0,1)
+    const n = parseInt(hex.slice(1),16);
+    let r=(n>>16)&255, g=(n>>8)&255, b=n&255;
+    r=Math.round(r*f); g=Math.round(g*f); b=Math.round(b*f);
+    return 'rgb('+r+','+g+','+b+')';
+  }
+
+  // ── 精灵生成 ──
+  function buildBalloon(){
+    const w=24, h=28, rows=[];
+    for(let y=0;y<h;y++){
+      let line='';
+      for(let x=0;x<w;x++){
+        if(y<22){
+          const dx=x-11.5, dy=y-11, d=Math.sqrt(dx*dx+dy*dy);
+          if(d>11) line+='.';
+          else if(d>10) line+='O';
+          else line += (x%2===0)?'T':'S';
+        } else if(y===22){
+          line += (x===9||x===14)?'R':'.';
+        } else {
+          if(x>=9 && x<=14){
+            if(y===23||y===26) line+='O';
+            else line += (x%2===0)?'B':'S';
+          } else line+='.';
+        }
+      }
+      rows.push(line);
+    }
+    return rows;
+  }
+  const BALLOON = buildBalloon();
+
+  function buildGem(){
+    return [
+      "....G....",
+      "...GWG...",
+      "..GWGGW..",
+      ".GWGGGGW.",
+      "WGGGGGGGW",
+      ".GWGGGGW.",
+      "..GWGGW..",
+      "...GWG...",
+      "....G....",
+    ];
+  }
+  const GEM = buildGem();
+
+  function buildBolt(){
+    return [
+      "..OOOOOOO..",
+      ".OLBBBBBBO.",
+      "OBBBBBBBBBO",
+      "OBBBBBBBBBO",
+      "OBBLBBBBBBO",
+      "OBBLBBBBBBO",
+      "OBBBLBBBBBO",
+      "OBBBBLBBBBO",
+      "OBBBBBLBBO.",
+      ".OBBBBBBBO.",
+      "..OOOOOOO..",
+    ];
+  }
+  const BOLT = buildBolt();
+
+  function buildPowerup(){
+    const w=11,h=11,rows=[];
+    for(let y=0;y<h;y++){
+      let line='';
+      for(let x=0;x<w;x++){
+        const dx=x-5,dy=y-5,d=Math.sqrt(dx*dx+dy*dy);
+        if(d>5) line+='.';
+        else if(d>4) line+='O';
+        else line+='B';
+      }
+      rows.push(line);
+    }
+    return rows;
+  }
+  const POWERUP = buildPowerup();
+
+  function drawSprite(rows, pal, ox, oy){
+    ox=Math.round(ox); oy=Math.round(oy);
+    for(let y=0;y<rows.length;y++){
+      const row=rows[y];
+      for(let x=0;x<row.length;x++){
+        const ch=row[x];
+        if(ch==='.'||ch===' ') continue;
+        const c=pal[ch];
+        if(!c) continue;
+        ctx.fillStyle=c;
+        ctx.fillRect(ox+x, oy+y, 1, 1);
+      }
+    }
+  }
+
+  // ── 状态 ──
+  const STATE = { MENU:0, PLAY:1, PAUSE:2, OVER:3 };
+  let state = STATE.MENU;
+  let balloon, fences, gems, bolts, powerups, particles;
+  let score, best, spawnTimer, elapsed, inv, invColor, fx;
+  best = parseInt(localStorage.getItem('hotAirBalloon.best')||'0',10) || 0;
+
+  function reset(){
+    balloon = { x:W/2, y:H-64, w:24, h:28, speed:230, vx:0 };
+    fences=[]; gems=[]; bolts=[]; powerups=[]; particles=[];
+    score=0; spawnTimer=0; elapsed=0; inv=0; invColor=null;
+    fx={ slow:0, magnet:0, double:0 };
+  }
+
+  // ── 难度 ──
+  function level(){ return Math.min(12, Math.floor(score/250)); }
+  function fallSpeed(){ return 60 + level()*14; }
+  function rowInterval(){ return Math.max(0.65, 1.5 - level()*0.075); }
+
+  // ── 生成一波 ──
+  function freeX(minGap, avoid){
+    for(let i=0;i<20;i++){
+      const x = 14 + Math.random()*(W-28);
+      let ok=true;
+      for(const a of avoid){
+        if(x > a.x-a.gap-minGap && x < a.x+a.gap+minGap){ ok=false; break; }
+      }
+      if(ok) return x;
+    }
+    return W/2;
+  }
+
+  function spawnRow(){
+    const L = 45 + Math.random()*85;            // ≤ 135 = 半屏
+    const maxX = W - 8 - L;
+    const fx0 = 8 + Math.random()*Math.max(1, maxX-8);
+    fences.push({ x:fx0, y:-18, w:L, h:16 });
+
+    const avoid = [ {x:fx0+L/2, gap:L/2} ];
+    // 宝石 1~2
+    const nG = 1 + (Math.random()<0.5?1:0);
+    for(let i=0;i<nG;i++){
+      const gx = freeX(12, avoid);
+      avoid.push({x:gx, gap:9});
+      gems.push({ x:gx, y:-10, type:Math.floor(Math.random()*GEMS.length), got:false });
+    }
+    // 闪电 ~6%
+    if(Math.random()<0.06){
+      const bx = freeX(12, avoid);
+      bolts.push({ x:bx, y:-12, hue:HUES[Math.floor(Math.random()*HUES.length)] });
+    }
+    // 道具 ~8%
+    if(Math.random()<0.08){
+      const px = freeX(12, avoid);
+      powerups.push({ x:px, y:-12, type:PU_KEYS[Math.floor(Math.random()*PU_KEYS.length)] });
+    }
+  }
+
+  // ── 输入 ──
+  const keys = {};
+  window.addEventListener('keydown', e=>{
+    if(['ArrowLeft','ArrowRight','a','A','d','D'].includes(e.key)) keys[e.key]=true;
+    if(e.key==='p'||e.key==='P'||e.key==='Escape'){
+      if(state===STATE.PLAY) pause();
+      else if(state===STATE.PAUSE) resume();
+    }
+  });
+  window.addEventListener('keyup', e=>{ keys[e.key]=false; });
+
+  let dragX = null;
+  cv.addEventListener('pointerdown', e=>{ dragX = toLogicalX(e.clientX); });
+  cv.addEventListener('pointermove', e=>{ if(dragX!==null) dragX = toLogicalX(e.clientX); });
+  window.addEventListener('pointerup', ()=>{ dragX=null; });
+  function toLogicalX(clientX){
+    const r = cv.getBoundingClientRect();
+    return (clientX - r.left) / r.width * W;
+  }
+
+  // ── 碰撞 ──
+  function aabb(ax,ay,aw,ah, bx,by,bw,bh){
+    return ax < bx+bw && ax+aw > bx && ay < by+bh && ay+ah > by;
+  }
+
+  // ── 更新 ──
+  function update(dt){
+    elapsed += dt;
+    // 气球移动
+    if(dragX!==null){
+      balloon.x += (dragX - balloon.x) * Math.min(1, dt*14);
+    } else {
+      let dir=0;
+      if(keys['ArrowLeft']||keys['a']||keys['A']) dir-=1;
+      if(keys['ArrowRight']||keys['d']||keys['D']) dir+=1;
+      balloon.x += dir * balloon.speed * dt;
+    }
+    balloon.x = Math.max(balloon.w/2+4, Math.min(W-balloon.w/2-4, balloon.x));
+
+    if(inv>0) inv -= dt;
+    if(fx.slow>0) fx.slow -= dt;
+    if(fx.magnet>0) fx.magnet -= dt;
+    if(fx.double>0) fx.double -= dt;
+
+    const mul = fx.slow>0 ? 0.5 : 1;
+    const v = fallSpeed()*mul;
+    const bx = balloon.x - balloon.w/2, by = balloon.y - balloon.h/2;
+
+    // 栅栏
+    for(let i=fences.length-1;i>=0;i--){
+      const f=fences[i]; f.y += v*dt;
+      if(f.y > H+20){ fences.splice(i,1); continue; }
+      if(aabb(bx,by,balloon.w,balloon.h, f.x,f.y,f.w,f.h)){
+        if(inv>0){ // 穿过并碎裂
+          for(let k=0;k<8;k++) particles.push({x:f.x+Math.random()*f.w, y:f.y+Math.random()*f.h, vx:(Math.random()-0.5)*120, vy:(Math.random()-0.5)*120, life:0.4, c:'#8a8f9c'});
+          fences.splice(i,1);
+        } else { gameOver(); return; }
+      }
+    }
+    // 宝石
+    for(let i=gems.length-1;i>=0;i--){
+      const g=gems[i];
+      if(fx.magnet>0 && Math.abs(g.x-balloon.x)<70) g.x += (balloon.x-g.x)*Math.min(1,dt*3);
+      g.y += v*dt;
+      if(g.y>H+12){ gems.splice(i,1); continue; }
+      if(!g.got && aabb(bx,by,balloon.w,balloon.h, g.x-5,g.y-5,10,10)){
+        g.got=true;
+        const add = (g.type===1?20:10) * (fx.double>0?2:1);
+        score += add;
+        gems.splice(i,1);
+      }
+    }
+    // 闪电
+    for(let i=bolts.length-1;i>=0;i--){
+      const b=bolts[i]; b.y += v*dt;
+      if(b.y>H+14){ bolts.splice(i,1); continue; }
+      if(aabb(bx,by,balloon.w,balloon.h, b.x-6,b.y-6,12,12)){
+        invColor = b.hue; inv = 4.0;
+        bolts.splice(i,1);
+      }
+    }
+    // 道具
+    for(let i=powerups.length-1;i>=0;i--){
+      const p=powerups[i]; p.y += v*dt;
+      if(p.y>H+14){ powerups.splice(i,1); continue; }
+      if(aabb(bx,by,balloon.w,balloon.h, p.x-6,p.y-6,12,12)){
+        applyPower(p.type);
+        powerups.splice(i,1);
+      }
+    }
+    // 粒子
+    for(let i=particles.length-1;i>=0;i--){
+      const pt=particles[i];
+      pt.x+=pt.vx*dt; pt.y+=pt.vy*dt; pt.life-=dt;
+      if(pt.life<=0) particles.splice(i,1);
+    }
+    // 生成
+    spawnTimer += dt;
+    if(spawnTimer >= rowInterval()){ spawnTimer=0; spawnRow(); }
+  }
+
+  function applyPower(type){
+    if(type==='shield'){ inv = Math.max(inv,5); invColor=null; }
+    else if(type==='slow') fx.slow = 5;
+    else if(type==='magnet') fx.magnet = 6;
+    else if(type==='double') fx.double = 8;
+  }
+
+  // ── 渲染 ──
+  function render(){
+    // 天空
+    const g = ctx.createLinearGradient(0,0,0,H);
+    g.addColorStop(0,'#243a5e'); g.addColorStop(0.55,'#3a5680'); g.addColorStop(1,'#5a78a0');
+    ctx.fillStyle=g; ctx.fillRect(0,0,W,H);
+    // 视差云
+    drawClouds();
+
+    // 栅栏
+    for(const f of fences) drawFence(f);
+    // 宝石
+    for(const gm of gems){
+      const pal={G:GEMS[gm.type], W:'#ffffff'};
+      drawSprite(GEM, pal, gm.x-4, gm.y-4);
+    }
+    // 闪电
+    for(const b of bolts){
+      const pal={O:'#15181f', B:b.hue, L:'#fff7c2'};
+      drawSprite(BOLT, pal, b.x-5, b.y-5);
+    }
+    // 道具
+    for(const p of powerups){
+      const col=PU[p.type].color;
+      const pal={O:'#15181f', B:col};
+      drawSprite(POWERUP, pal, p.x-5, p.y-5);
+    }
+    // 粒子
+    for(const pt of particles){
+      ctx.globalAlpha=Math.max(0,pt.life/0.4);
+      ctx.fillStyle=pt.c; ctx.fillRect(Math.round(pt.x),Math.round(pt.y),2,2);
+      ctx.globalAlpha=1;
+    }
+    // 气球
+    drawBalloon();
+  }
+
+  let cloudSeed = [ {x:40,y:80,s:1.4,sp:8}, {x:200,y:200,s:1.0,sp:6}, {x:120,y:340,s:1.2,sp:7} ];
+  function drawClouds(){
+    ctx.fillStyle='rgba(111,140,176,0.35)';
+    for(const c of cloudSeed){
+      const yy = ((c.y + elapsed*c.sp) % (H+60)) - 30;
+      const w=38*c.s, h=12*c.s;
+      ctx.beginPath();
+      ctx.ellipse(c.x, yy, w, h, 0, 0, Math.PI*2);
+      ctx.fill();
+    }
+  }
+
+  function drawFence(f){
+    ctx.fillStyle='#3a3f4f'; ctx.fillRect(f.x, f.y, f.w, f.h);
+    ctx.fillStyle='#8a8f9c'; ctx.fillRect(f.x+1, f.y+1, f.w-2, f.h-3);
+    ctx.fillStyle='#ff5e5e'; ctx.fillRect(f.x+1, f.y+1, f.w-2, 2);
+    ctx.fillStyle='#2a2f3a'; ctx.fillRect(f.x, f.y+f.h-1, f.w, 1);
+  }
+
+  function drawBalloon(){
+    const bw = balloon.w, bh = balloon.h;
+    const ox = balloon.x - bw/2, oy = balloon.y - bh/2;
+    let pal;
+    if(invColor){
+      pal = { O:'#15181f', T:invColor, S:shade(invColor,0.6), B:'#7a4a2a', R:'#15181f' };
+    } else {
+      pal = { O:'#15181f', T:'#e8ecf2', S:'#9aa3b2', B:'#7a4a2a', R:'#15181f' };
+    }
+    // 无敌闪烁
+    if(inv>0){ ctx.globalAlpha = 0.55 + 0.45*Math.abs(Math.sin(elapsed*22)); }
+    drawSprite(BALLOON, pal, ox, oy);
+    ctx.globalAlpha = 1;
+    // 染色外发光
+    if(invColor){
+      ctx.save();
+      ctx.globalAlpha=0.5; ctx.shadowColor=invColor; ctx.shadowBlur=10;
+      ctx.strokeStyle=invColor; ctx.lineWidth=1;
+      ctx.strokeRect(ox-1,oy-1,bw+2,bh+2);
+      ctx.restore();
+    }
+    // 护盾环（无敌但无染色）
+    if(inv>0 && !invColor){
+      ctx.save(); ctx.globalAlpha=0.85; ctx.strokeStyle='#9be7ff'; ctx.lineWidth=1;
+      ctx.strokeRect(ox-2,oy-2,bw+4,bh+4); ctx.restore();
+    }
+  }
+
+  // ── HUD ──
+  const elScore=document.getElementById('score');
+  const elBest=document.getElementById('best');
+  const elEffects=document.getElementById('effects');
+  function pad(n){ return String(n).padStart(6,'0'); }
+  function updateHUD(){
+    elScore.textContent = 'SCORE ' + pad(score);
+    elBest.textContent = 'BEST ' + Math.max(best, score);
+    let html='';
+    const chip=(color,label,frac)=>{
+      const pct=Math.max(0,Math.min(1,frac))*100;
+      return '<div class="chip" style="color:'+color+'"><span class="dot" style="background:'+color+'"></span>'+label+'<span class="bar"><i style="width:'+pct+'%"></i></span></div>';
+    };
+    if(invColor) html += chip(invColor,'通电', inv/4);
+    else if(inv>0) html += chip('#9be7ff','护盾', inv/5);
+    if(fx.slow>0)   html += chip(PU.slow.color,'缓降', fx.slow/5);
+    if(fx.magnet>0) html += chip(PU.magnet.color,'吸铁', fx.magnet/6);
+    if(fx.double>0) html += chip(PU.double.color,'双倍', fx.double/8);
+    elEffects.innerHTML = html;
+  }
+
+  // ── 主循环 ──
+  let last=0;
+  function loop(t){
+    if(!last) last=t;
+    let dt=(t-last)/1000; last=t;
+    if(dt>0.05) dt=0.05;
+    if(state===STATE.PLAY) update(dt);
+    render();
+    if(state===STATE.PLAY) updateHUD();
+    requestAnimationFrame(loop);
+  }
+
+  // ── 流程 ──
+  const menu=document.getElementById('menu');
+  const pauseEl=document.getElementById('pause');
+  const overEl=document.getElementById('over');
+
+  function start(){
+    reset(); state=STATE.PLAY; last=0;
+    menu.classList.add('hidden'); pauseEl.classList.add('hidden'); overEl.classList.add('hidden');
+  }
+  function pause(){ if(state!==STATE.PLAY) return; state=STATE.PAUSE; pauseEl.classList.remove('hidden'); }
+  function resume(){ if(state!==STATE.PAUSE) return; state=STATE.PLAY; last=0; pauseEl.classList.add('hidden'); }
+  function toMenu(){ state=STATE.MENU; pauseEl.classList.add('hidden'); overEl.classList.add('hidden'); menu.classList.remove('hidden'); }
+  function gameOver(){
+    state=STATE.OVER;
+    if(score>best){ best=score; localStorage.setItem('hotAirBalloon.best', String(best)); }
+    document.getElementById('finalScore').textContent=score;
+    document.getElementById('finalBest').textContent=best;
+    overEl.classList.remove('hidden');
+  }
+
+  document.getElementById('startBtn').onclick=start;
+  document.getElementById('againBtn').onclick=start;
+  document.getElementById('resumeBtn').onclick=resume;
+  document.getElementById('restartBtn1').onclick=start;
+  document.getElementById('menuBtn1').onclick=toMenu;
+  document.getElementById('menuBtn2').onclick=toMenu;
+  document.getElementById('pauseBtn').onclick=()=>{ state===STATE.PLAY?pause():state===STATE.PAUSE?resume():null; };
+
+  reset();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
