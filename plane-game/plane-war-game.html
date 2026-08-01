@@ -205,71 +205,187 @@
   };
 
   // ── 像素精灵 ──
-  // 玩家战机（22×22，朝上）— 手绘精细矩阵：座舱/机翼高光/翼尖/引擎尾焰/描边
+  // 玩家战机（22×22，朝上）— 手绘精细矩阵 v2：尖鼻锥 / 冰蓝座舱 / 翼肩高光 / 翼尖金高光 / 引擎底座
   const SPR_PLAYER = [
-    "...........DD.........",
-    "..........DBBD........",
-    "..........DBBD........",
-    "........DBBBBD........",
-    "........DBBBBD........",
-    ".......DBBBBBBD.......",
-    ".......DBLLLBBD.......",
-    ".......DBLLLBBD.......",
-    ".......DBCCCBBD.......",
-    ".......DBCCCBBD.......",
-    ".......DBBBBBBD.......",
-    ".......DBBBBBBD.......",
-    "......DBBBBBBBBD......",
-    "..WW..DBBBBBBBBD..WW..",
-    "......DBBBBBBBBD......",
-    ".......DBBBBBBD.......",
-    "........DBBBBD........",
-    "........DBBBBD........",
+    "..........DD..........",
     ".........DBBD.........",
     ".........DBBD.........",
-    "......................",
+    "........DBBBBD........",
+    "........DBBBBD........",
+    ".......DBLBBLBD.......",
+    ".......DBLBBLBD.......",
+    "......DBLLBBLLBD......",
+    "......DBLCCCCLBD......",
+    "......DBLCCCCLBD......",
+    "......DBLLBBLLBD......",
+    ".....DBBBBBBBBBBD.....",
+    "....WDBBBBBBBBBBDW....",
+    "...WWDBBBBBBBBBBDWW...",
+    "....WDBBBBBBBBBBDW....",
+    ".....DBBBBBBBBBBD.....",
+    "......DBBBBBBBBD......",
+    ".......DBBBBBBD.......",
+    "........DBBBBD........",
+    ".........DBBD.........",
+    "..........DD..........",
     "......................",
   ];
-  // 引擎尾焰：3 帧循环（宽暗 <-> 窄亮），G=暗橙 O=亮芯
+  // 引擎尾焰：4 帧循环（宽 <-> 窄亮 <-> 中 <-> 加力长），G=暗橙 O=亮芯
   const FLAME_FRAMES = [
-    [".........DGGGD........", "........DGGGGGD......."],
-    [".........DGOGD........", "..........GOG........."],
-    [".........DGGGD........", ".........DGGGD........"],
+    ["........DGGGGD........", ".........DGGD........."],
+    [".........DOOD.........", "..........OO.........."],
+    [".......DGGGGGGD.......", "........DGGGGD........"],
+    ["......DGGGGGGGGD......", ".....DGGGGGGGGD......."],
+  ];
+  // 玩家机身：2 帧（基础 + 引擎跳动脉冲：底座 DD -> OO），由 pFrameIdx 驱动
+  const SPR_PLAYER_FRAMES = [
+    SPR_PLAYER,
+    SPR_PLAYER.map((r,i) => i === 20 ? '..........OO..........' : r),
   ];
   const PAL_PLAYER = {D:'#c43e34', B:'#ff6b5e', C:'#9be7ff', W:'#ffd23f', L:'#ffb3a7', G:'#ffb74d', O:'#fff1c2'};
   const PAL_PLAYER_FLASH = {D:'#ffffff', B:'#ffffff', C:'#eaf6ff', W:'#ffffff', L:'#ffffff', G:'#ffd23f', O:'#fff1c2'};
 
-  // 敌机（18×18，朝下）— 手绘精细矩阵：机身/深色描边/金眼/尾部收束
+  // 敌机（18×18，朝下）— 三种 archetype 各一矩阵，按难度分层（造型即难度）：
+  //   0 品红·基础飞碟（圆润双金眼） | 1 青绿·高速飞镖（窄长单金眼） | 2 紫·精英炮舰（宽体双炮塔）
   const SPR_ENEMY = [
-    ".......dddd.......",
-    ".....deeeeed......",
-    "....deeeeeeed.....",
-    "....deEEeeEEed....",
-    "..deeeeeeeeeeed...",
-    "..deeeeeeeeeeed...",
-    ".deeeeeeeeeeeeeed.",
-    "deeeeeeeeeeeeeeeed",
-    "deeeeeeeeeeeeeeeed",
-    ".deeeeeeeeeeeeeed.",
-    "..deeeeeeeeeeed...",
-    "...deeeeeeeeeed...",
-    "....deeeeeeeed....",
-    ".....deeeeeed.....",
-    "......deeeed......",
-    "......deeed.......",
-    ".......ddd........",
-    "........d.........",
+    [ // 类型 0 · 品红 · 基础飞碟
+      [ // 基础帧
+        ".......dddd.......",
+        ".....deeeeeed.....",
+        "....deeeeeeeed....",
+        "...deeeeeeeeeed...",
+        "..deeeeeeeeeeeed..",
+        "..deeEEeeeeEEeed..",
+        "..deeeeeeeeeeeed..",
+        "...deeeeeeeeeed...",
+        "...deeeeeeeeeed...",
+        "....deeeeeeeed....",
+        ".....deeeeeed.....",
+        "......deeeed......",
+        ".......deed.......",
+        "........dd........",
+        "..................",
+        "..................",
+        "..................",
+        "..................",
+      ],
+      [ // 形变帧
+        ".......dddd.......",
+        ".....deeeeeed.....",
+        "....deeeeeeeed....",
+        "...deeeeeeeeeed...",
+        "..deeeeeeeeeeeed..",
+        "..deeEEeeeeEEeed..",
+        "..deeeeeeeeeeeed..",
+        "...deeeeeeeeeed...",
+        "...deeeeeeeeeed...",
+        "....deeeeeeeed....",
+        ".....deeeeeed.....",
+        "......deeeed......",
+        ".......deed.......",
+        "......deeeed......",
+        "..................",
+        "..................",
+        "..................",
+        "..................",
+      ],
+    ],
+    [ // 类型 1 · 青绿 · 高速飞镖
+      [ // 基础帧
+        "........dd........",
+        ".......deed.......",
+        ".......deed.......",
+        "......deeeed......",
+        "......deeeed......",
+        ".....deeEEeed.....",
+        ".....deeEEeed.....",
+        "....deeeeeeeed....",
+        "....deeeeeeeed....",
+        "...deeeeeeeeeed...",
+        "...deeeeeeeeeed...",
+        "..deeeeeeeeeeeed..",
+        "..deeeeeeeeeeeed..",
+        "...deeeeeeeeeed...",
+        "....deeeeeeeed....",
+        "......dd..dd......",
+        "..................",
+        "..................",
+      ],
+      [ // 形变帧
+        "........dd........",
+        ".......deed.......",
+        ".......deed.......",
+        "......deeeed......",
+        "......deeeed......",
+        ".....deeEEeed.....",
+        ".....deeEEeed.....",
+        "....deeeeeeeed....",
+        "....deeeeeeeed....",
+        "...deeeeeeeeeed...",
+        "...deeeeeeeeeed...",
+        "..deeeeeeeeeeeed..",
+        "..deeeeeeeeeeeed..",
+        "...deeeeeeeeeed...",
+        "....deeeeeeeed....",
+        "......OO..OO......",
+        "..................",
+        "..................",
+      ],
+    ],
+    [ // 类型 2 · 紫 · 精英炮舰
+      [ // 基础帧
+        "..d............d..",
+        "..dd..........dd..",
+        "....deeeeeeeed....",
+        "...deeeeeeeeeed...",
+        "..deeeeeeeeeeeed..",
+        "..deEEeeeeeeEEed..",
+        ".deeeeeeeeeeeeeed.",
+        ".deeeeeeeeeeeeeed.",
+        "..deeeeeeeeeeeed..",
+        "...deeeeeeeeeed...",
+        "....deeeeeeeed....",
+        ".....deeeeeed.....",
+        "......deeeed......",
+        ".......deed.......",
+        "........dd........",
+        "..................",
+        "..................",
+        "..................",
+      ],
+      [ // 形变帧
+        "..d............d..",
+        "..dd..........dd..",
+        "..ww..........ww..",
+        "...deeeeeeeeeed...",
+        "..deeeeeeeeeeeed..",
+        "..deEEeeeeeeEEed..",
+        ".deeeeeeeeeeeeeed.",
+        ".deeeeeeeeeeeeeed.",
+        "..deeeeeeeeeeeed..",
+        "...deeeeeeeeeed...",
+        "....deeeeeeeed....",
+        ".....deeeeeed.....",
+        "......deeeed......",
+        ".......deed.......",
+        "........dd........",
+        "..................",
+        "..................",
+        "..................",
+      ],
+    ],
   ];
   const ENEMY_TYPES = [
     {body:'#ff4d8d', dark:'#7a1740', score:100},
     {body:'#3fd9c9', dark:'#155e57', score:150},
     {body:'#b56bff', dark:'#4a2a7a', score:250},
   ];
-  const PAL_ENEMY = (body, dark) => ({e:body, d:dark, E:'#ffd23f'});
+  const PAL_ENEMY = (body, dark) => ({e:body, d:dark, E:'#ffd23f', w:'#fff4d6', G:'#ffb74d', O:'#fff1c2', M:'#cdbff0'});
+  const PAL_ENEMY_FLASH = {e:'#ffffff', d:'#ffffff', E:'#ffffff', w:'#ffffff', G:'#ffffff', O:'#ffffff', M:'#ffffff'}; // 命中白闪：仅精灵像素
 
   // ── Boss：预渲染大精灵（突破手敲矩阵上限，bake 到离屏 canvas + drawImage）──
-  const PAL_BOSS = {d:'#2a1f4d', m:'#6b5ca8', M:'#9a8fc7', e:'#ff4d6d', E:'#ffd23f', c:'#9be7ff', G:'#ffb74d', O:'#fff1c2'};
-  function buildBoss(){
+  const PAL_BOSS = {d:'#2a1f4d', m:'#6b5ca8', M:'#9a8fc7', e:'#ff4d6d', E:'#ffd23f', c:'#9be7ff', G:'#ffb74d', O:'#fff1c2', w:'#fff4d6'};
+  function buildBoss(phase){
     const Wb=48, Hb=34;
     const g = Array.from({length:Hb}, () => new Array(Wb).fill('.'));
     const set=(x,y,c)=>{ if(y>=0&&y<Hb&&x>=0&&x<Wb) g[y][x]=c; };
@@ -282,6 +398,8 @@
     for(let y=3;y<=6;y++){ const w=4+(y-3)*4; for(let x=24-w;x<=24+w&&x<Wb;x++) g[y][x]='m'; }
     // 下部舰体（收窄）
     for(let y=25;y<=28;y++){ const w=18-(y-25)*4; for(let x=24-w;x<=24+w;x++) g[y][x]='m'; }
+    // 顶部天线
+    set(24,1,'d'); set(24,2,'d'); set(23,2,'m'); set(25,2,'m');
     // 深色描边（舰体边界）
     const isM=(x,y)=> (y>=0&&y<Hb&&x>=0&&x<Wb&&g[y][x]==='m');
     for(let y=0;y<Hb;y++) for(let x=0;x<Wb;x++){
@@ -289,15 +407,27 @@
     }
     // 顶部金属高光条
     for(let x=10;x<=37;x++) if(g[8][x]==='m') g[8][x]='M';
-    // 中央核心 + 眼
+    // 装甲脊（中线高光）
+    for(let y=10;y<=22;y++) if(g[y][24]==='m') g[y][24]='M';
+    // 中央核心（发光）：e 外壳 + E 金环 + w 白热 + c 冰蓝瞳
     for(let y=13;y<=19;y++) for(let x=20;x<=27;x++) g[y][x]='e';
     for(let y=15;y<=17;y++) for(let x=22;x<=25;x++) g[y][x]='E';
-    g[16][23]='c'; g[16][24]='c';
+    g[16][24]='w';
+    g[15][24]='c'; g[17][24]='c';
+    g[16][23]='c'; g[16][25]='c';
     // 两侧炮塔
     for(let y=14;y<=22;y++){ for(let x=8;x<=11;x++) g[y][x]='M'; for(let x=36;x<=39;x++) g[y][x]='M'; }
     for(let y=20;y<=26;y++){ set(9,y,'d'); set(10,y,'m'); set(37,y,'d'); set(38,y,'m'); }
-    // 底部推进器
-    for(let y=29;y<=32;y++){ set(18,y,'G'); set(19,y,'O'); set(20,y,'G'); set(27,y,'G'); set(28,y,'O'); set(29,y,'G'); }
+    // 炮口（朝下小突起）
+    set(9,27,'d'); set(38,27,'d');
+    // 底部推进器（增强：G 外焰 + O 芯 + w 高光）；phase=1 时火焰延长 + 炮口白热
+    const yMax = phase === 1 ? 33 : 32;
+    for(let y=29;y<=yMax;y++){
+      set(17,y,'G'); set(18,y,'O'); set(19,y,'w'); set(20,y,'O'); set(21,y,'G');
+      set(26,y,'G'); set(27,y,'O'); set(28,y,'w'); set(29,y,'O'); set(30,y,'G');
+    }
+    // 炮口（朝下小突起）：phase=1 白热发光
+    set(9,27, phase===1 ? 'w' : 'd'); set(38,27, phase===1 ? 'w' : 'd');
     return g.map(r=>r.join(''));
   }
   // 把字符矩阵 bake 到离屏 canvas（只画一次，之后每帧 drawImage，GPU 加速）
@@ -333,7 +463,7 @@
   }
   function drawPlayer(x, y, flash){
     const pal = flash ? PAL_PLAYER_FLASH : PAL_PLAYER;
-    drawSprite(SPR_PLAYER, pal, x, y, SPRITE_SCALE);
+    drawSprite(SPR_PLAYER_FRAMES[pFrameIdx], pal, x, y, SPRITE_SCALE);
     drawSprite(FLAME_FRAMES[flameIdx], pal, x, y+20*SPRITE_SCALE, SPRITE_SCALE);
   }
 
@@ -342,6 +472,7 @@
   let player, bullets, ebullets, enemies, particles, stars, boss;
   let score, best, lives, wave, elapsed, spawnTimer, fireTimer, shake, comboTimer, combo;
   let bossStage, bossNextAt, flameIdx, flameTimer;
+  let pFrameIdx, pFrameTimer, eFrameIdx, eFrameTimer, bFrameIdx, bFrameTimer;
   best = parseInt(localStorage.getItem('planeWar.best') || '0', 10);
 
   // 输入
@@ -369,6 +500,7 @@
     score = 0; lives = 3; wave = 1; elapsed = 0;
     spawnTimer = 0; fireTimer = 0; shake = 0; combo = 0; comboTimer = 0;
     bossStage = 1; bossNextAt = 45; flameIdx = 0; flameTimer = 0;
+    pFrameIdx = 0; pFrameTimer = 0; eFrameIdx = 0; eFrameTimer = 0; bFrameIdx = 0; bFrameTimer = 0;
     updateHUD();
   }
 
@@ -396,16 +528,17 @@
   function spawnEnemy(){
     const r = Math.random();
     let ti = 0;
-    if(elapsed > 25 && r > 0.75) ti = 2;
-    else if(elapsed > 10 && r > 0.5) ti = 1;
+    if(elapsed > 20 && r > 0.62) ti = 2;          // 紫炮舰：20s 后、约 38% 概率（原 25s / 25%）
+    else if(elapsed > 8 && r > 0.45) ti = 1;      // 绿飞镖：8s 后更常见
     const t = ENEMY_TYPES[ti];
     const w = 18, h = 18;
     const base = 36 + elapsed*1.6 + ti*14;
+    const hp = ti===2 ? 4 : ti===1 ? 2 : 1;        // 紫4血 / 绿2血 / 红1血（让精英能扛几发、真正开火）
     enemies.push({
       x: 8 + Math.random()*(W-16-w), y: -h, w, h,
       vy: base, vx: (Math.random()-0.5)*(ti*8),
-      type:ti, body:t.body, dark:t.dark, score:t.score,
-      shootCD: 1 + Math.random()*2, canShoot: ti>0 && elapsed>15,
+      type:ti, body:t.body, dark:t.dark, score:t.score, hp, hitFlash:0,
+      shootCD: 0.4 + Math.random()*0.8, canShoot: ti>0 && elapsed>12,  // 进场即接近开火
     });
   }
 
@@ -429,7 +562,7 @@
     boss = {
       x: W/2 - w/2, y: -h, w, h,
       hp: 40 + bossStage*20, maxHp: 40 + bossStage*20,
-      canvas: bakeSprite(buildBoss(), PAL_BOSS, 1),
+      frames: [bakeSprite(buildBoss(0), PAL_BOSS, 1), bakeSprite(buildBoss(1), PAL_BOSS, 1)],
       t: 0, shootCD: 2.2, pattern: 0, entering: true,
       phase: 1, volley: 0,
       laser: {state:'idle', t:0, x:W/2},
@@ -558,9 +691,18 @@
   function update(dt){
     elapsed += dt;
     wave = 1 + Math.floor(elapsed/20);
-    // 引擎尾焰帧动画
+    // 引擎尾焰帧动画（4 帧循环）
     flameTimer -= dt;
     if(flameTimer<=0){ flameTimer = 0.07; flameIdx = (flameIdx+1) % FLAME_FRAMES.length; }
+    // 玩家机身呼吸帧（2 帧，慢）
+    pFrameTimer -= dt;
+    if(pFrameTimer<=0){ pFrameTimer = 0.18; pFrameIdx = (pFrameIdx+1) % SPR_PLAYER_FRAMES.length; }
+    // 敌机形变帧（每型 2 帧）
+    eFrameTimer -= dt;
+    if(eFrameTimer<=0){ eFrameTimer = 0.3; eFrameIdx = (eFrameIdx+1) % 2; }
+    // Boss 推进器火焰帧（2 帧）
+    bFrameTimer -= dt;
+    if(bFrameTimer<=0){ bFrameTimer = 0.16; bFrameIdx = (bFrameIdx+1) % 2; }
     // 星空
     for(const s of stars){
       s.y += s.speed*dt;
@@ -588,8 +730,10 @@
     fireTimer -= dt;
     if(fireTimer<=0){
       fireTimer = 0.16;
-      bullets.push({x:player.x-6, y:player.y-player.h/2, vy:-260});
-      bullets.push({x:player.x+4, y:player.y-player.h/2, vy:-260});
+      // 子弹速度随生存时间增长（斜率 1.9 > 敌机下落 1.6），后期始终快过最快的敌机
+      const bSpeed = 260 + elapsed*1.9;
+      bullets.push({x:player.x-6, y:player.y-player.h/2, vy:-bSpeed});
+      bullets.push({x:player.x+4, y:player.y-player.h/2, vy:-bSpeed});
     }
 
     // 子弹
@@ -614,25 +758,32 @@
       e.y += e.vy*dt;
       e.x += e.vx*dt;
       if(e.x < 4 || e.x > W-4-e.w) e.vx *= -1;
+      if(e.hitFlash>0) e.hitFlash -= dt;
       if(e.canShoot){
         e.shootCD -= dt;
         if(e.shootCD<=0 && e.y>0 && e.y<H*0.7){
           e.shootCD = 1.4 + Math.random()*1.6;
-          ebullets.push({x:e.x+e.w/2-1, y:e.y+e.h, vy:130+e.type*30});
+          // 敌弹速度随生存时间增长（斜率 1.8 > 敌机下落 1.6），后期敌机不会反超自己的子弹；0s 仍等于原速 130+type*30
+          ebullets.push({x:e.x+e.w/2-1, y:e.y+e.h, vy:(130+e.type*30) + elapsed*1.8});
         }
       }
     }
 
-    // 碰撞：玩家子弹 vs 敌人（标准 AABB：子弹条 y..y+6 与敌矩形重叠）
+    // 碰撞：玩家子弹 vs 敌人（标准 AABB；敌机现具 hp，需多次命中）
     for(const b of bullets){
       if(b.dead) continue;
       for(const e of enemies){
         if(e.dead) continue;
         if(b.x+3 > e.x && b.x < e.x+e.w && b.y < e.y+e.h && b.y+8 > e.y){
-          e.dead = true; b.dead = true;
-          score += Math.round(e.score * comboMult());
-          combo++; comboTimer = 1.2;
-          spawnExplosion(e.x+e.w/2, e.y+e.h/2, e.type===2);
+          b.dead = true; e.hp--;
+          if(e.hp<=0){
+            e.dead = true;
+            score += Math.round(e.score * comboMult());
+            combo++; comboTimer = 1.2;
+            spawnExplosion(e.x+e.w/2, e.y+e.h/2, e.type===2);
+          } else {
+            e.hitFlash = 0.09;   // 非致命命中：白闪反馈，体现「精英扛揍」
+          }
           break;
         }
       }
@@ -730,10 +881,28 @@
       ctx.fillStyle = '#ffd23f';
       for(const b of bullets) ctx.fillRect(Math.round(b.x), Math.round(b.y), 3, 8);
       // 敌人
-      for(const e of enemies) drawSprite(SPR_ENEMY, PAL_ENEMY(e.body, e.dark), e.x, e.y, SPRITE_SCALE);
+      for(const e of enemies){
+        const ebob = Math.round(Math.sin(elapsed*5 + e.x*0.35)*0.8); // 轻微浮动，仅视觉
+        drawSprite(SPR_ENEMY[e.type][eFrameIdx], PAL_ENEMY(e.body, e.dark), e.x, e.y + ebob, SPRITE_SCALE);
+        if(e.hitFlash>0){
+          ctx.globalAlpha = Math.min(1, e.hitFlash/0.09);   // 贴合精灵形状的白闪，而非方形块
+          drawSprite(SPR_ENEMY[e.type][eFrameIdx], PAL_ENEMY_FLASH, e.x, e.y + ebob, SPRITE_SCALE);
+          ctx.globalAlpha = 1;
+        }
+      }
       // Boss（预渲染大精灵）
       if(boss){
-        ctx.drawImage(boss.canvas, Math.round(boss.x), Math.round(boss.y));
+        ctx.drawImage(boss.frames[bFrameIdx], Math.round(boss.x), Math.round(boss.y));
+        // 核心辉光（加色叠加，轻微脉动）
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        const bgx = boss.x + 24, bgy = boss.y + 16;
+        const bgp = 0.32 + 0.18 * Math.sin(elapsed * 4);
+        const bg = ctx.createRadialGradient(bgx, bgy, 0, bgx, bgy, 11);
+        bg.addColorStop(0, 'rgba(255,77,109,' + bgp.toFixed(3) + ')');
+        bg.addColorStop(1, 'rgba(255,77,109,0)');
+        ctx.fillStyle = bg; ctx.fillRect(bgx - 11, bgy - 11, 22, 22);
+        ctx.restore();
         const bw=176, bh=5, bx=(W-bw)/2, by=9;
         const hpRatio = Math.max(0, boss.hp/boss.maxHp);
         const hpColor = boss.phase===3 ? '#ff2d4d' : (boss.phase===2 ? '#ff7a3d' : '#ff4d6d');
@@ -782,6 +951,17 @@
       // 玩家（引擎尾焰帧动画 + 受击白闪）
       const flash = player.inv>0 && (Math.floor(player.inv*16)%2===0);
       drawPlayer(player.x-player.w/2, player.y-player.h/2, flash);
+      // 引擎辉光（加色叠加，仅视觉）
+      if(state==='playing'){
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        const egx = player.x, egy = player.y + 11;
+        const eg = ctx.createRadialGradient(egx, egy, 0, egx, egy, 9);
+        eg.addColorStop(0, 'rgba(255,183,77,0.55)');
+        eg.addColorStop(1, 'rgba(255,183,77,0)');
+        ctx.fillStyle = eg; ctx.fillRect(egx-9, egy-9, 18, 18);
+        ctx.restore();
+      }
       // 粒子
       for(const p of particles){
         ctx.globalAlpha = Math.max(0, p.life/p.max);
