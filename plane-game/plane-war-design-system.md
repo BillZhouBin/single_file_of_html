@@ -269,7 +269,7 @@ active          translateY(0)
 - **竖屏优先**（9:16），适配手机与桌面。
 - `game-shell` 高度 `min(100vh, 100vw * 400/240)`，`aspect-ratio: 240/400` 居中。
 - **输入双通道**：
-  - 桌面：方向键 / `WASD` 移动，`P`/`Esc` 暂停，**自动开火**。
+  - 桌面：方向键 / `WASD` 移动，`P`/`Esc` 暂停，`M` 静音开关，**自动开火**。
   - 移动：手指拖动战机（pointer 事件，战机跟随指下偏移），自动开火；右上角暂停按钮。
 - 不做"移动端隐藏功能"——所有核心操作在两端等价可用。
 
@@ -282,6 +282,7 @@ active          translateY(0)
 - `prefers-reduced-motion` 降级动效。
 - 触控目标 ≥ 44px（按钮与暂停键）。
 - 分数/生命用文字+图标双通道，不依赖纯颜色传达状态。
+- 音效仅为视觉事件的**增强反馈**（非关键信息），并有 `M` 键全局静音开关，兼顾听觉障碍与安静环境。
 
 ---
 
@@ -293,6 +294,58 @@ active          translateY(0)
 4. 最高分 `localStorage('planeWar.best')`，失败态读取展示。
 5. 精灵矩阵存为常量数组，`drawSprite(matrix, palette, x, y)` 统一渲染。
 6. Boss 走预渲染路线：`buildBoss()` 生成矩阵 + `bakeSprite()` 离屏 canvas 一次性 bake，每帧 `drawImage` 贴图；玩家尾焰 `FLAME_FRAMES` 3 帧循环由 `drawPlayer()` 组合渲染。
+7. 音效走 **Web Audio 程序化合成**（OscillatorNode + GainNode 包络 + 噪声爆音），零外部音频文件，保持单文件离线可用；AudioContext **懒初始化**、在首次用户交互（任一按钮点击 / `M` 键）时激活以符合浏览器自动播放策略；`shoot` 音 70ms 节流防高频堆叠；`M` 键切换 `sfxOn` 全局静音。
+
+---
+
+## 八、音效设计（SFX 声纹）
+
+### 8.1 设计原则
+
+- **8-bit 像素声纹**：以方波（square）为主音色，锯齿波（sawtooth）承担厚重/威胁感音效，噪声爆音（noise burst + 低通）承担爆炸质感——与视觉的像素美学同构。
+- **短促优先**：单发音效 ≤ 0.35s，不抢节奏；Boss 出场/激光/死亡等大事件 ≤ 1.1s。
+- **可辨性**：玩家方（射击/命中）走高音区，敌方威胁（受击/激光）走低音区+扫频，方向一听即辨。
+- **性能**：全部实时合成，零解码/零文件体积；`shoot` 节流防堆叠，AudioContext 单实例。
+
+### 8.2 音效清单
+
+| 事件 | 触发点 | 波形 | 频率扫动 | 时长 | 音量 |
+|------|--------|------|----------|------|------|
+| `ui` 按钮点击 | 全部按钮/菜单切换 | square | 660→990 | 0.07s | 0.12 |
+| `shoot` 玩家射击 | 自动开火每 0.16s | square | 940→320 | 0.06s | 0.05（节流 70ms） |
+| `ehit` 敌机命中（非致命） | 精英敌机 `hitFlash` | square | 300→540 | 0.08s | 0.14 |
+| `edie` 敌机击毁 | `e.dead` | square+noise | 430→60 | 0.22s | 0.2 / 0.16 |
+| `phit` 玩家受击 | `hitPlayer()` | sawtooth+noise | 230→55 | 0.32s | 0.28 / 0.2 |
+| `bhit` Boss 受击 | 子弹命中 Boss | square | 190→270 | 0.07s | 0.14 |
+| `boss` Boss 出场 | `spawnBoss()` | sawtooth+square+noise | 55→120 / 120→240 | 0.9s | 0.22 / 0.1 |
+| `charge` 激光蓄力 | P3 激光 `state=charge` | sawtooth | 180→720 | 1.1s | 0.12（与 1.2s 蓄力同步） |
+| `laser` 激光发射 | `state=fire` | sawtooth+square+noise | 130→42 | 0.9s | 0.24 / 0.07 |
+| `bossdie` Boss 击毁 | `killBoss()` | 5 连爆+双音上行 | 520→60×5 | ~1.0s | 0.16 |
+| `combo` 连击 | 击杀且 `combo≥2` | square 双音 | 音高随 combo 升（440+40×c） | 0.12s | 0.16 |
+| `gameover` 游戏结束 | `gameOver()` | square 下行三音 | 440→330→220 | 0.86s | 0.2 |
+
+### 8.3 实现要点
+
+- `tone(type, f0, f1, dur, vol, delay)`：振荡器 + 指数包络（5ms 起音，指数衰减到 0.0001），频率用 `exponentialRamp` 扫动。
+- `noiseBurst(dur, vol, cutoff, delay)`：白噪声 Buffer + 线性衰减 + 低通滤波，用于爆炸/轰鸣质感。
+- `sfx(name, arg)`：统一分发入口，`sfxOn=false` 直接短路；`shoot` 走 `performance.now()` 节流。
+- 浏览器自动播放策略：`AudioContext` 在首个按钮点击时创建/恢复（`ensureAudio()`），此后全流程可发声。
+
+### 8.4 BGM（8-bit 琶音循环）
+
+- **构成**：128 BPM，`Am → F → C → G` 和弦进行（每和弦一小节，4 小节循环），三轨合成：
+  - 琶音：三角波，和弦音 `[根音, 三音, 五音, 三音]` 每 8 分音符循环（音量 0.05）；
+  - 贝斯：方波，每小节第 1/5 个 8 分音符播根音低八度（0.06）；
+  - 踩镲：噪声短爆（0.03s，低通 6kHz，音量 0.02），奇数步增强节奏。
+- **调度**：Lookahead 模式——`setInterval(25ms)` + 提前 120ms 按绝对时间排音符，节拍精确且无卡顿；生命周期：开始/继续 → `bgmStart()`，暂停/结束/回菜单 → `bgmStop()`。
+- **静音联动**：`M` 键切换 `sfxOn` 时 BGM 一并启停；解除静音且处于游玩中时自动恢复。
+- **性能**：全部实时合成、无限循环、零文件体积，与 SFX 共用单 AudioContext。
+
+---
+
+## 附：GitHub Pages 在线地址
+- 合集首页 `https://game.xzz.cloud-ip.cc/`
+- 飞机大战 `https://game.xzz.cloud-ip.cc/plane-game/plane-war-game.html`
 
 ---
 **UI Designer · 像素君** — 设计系统已就绪，原型可直接打开试玩。

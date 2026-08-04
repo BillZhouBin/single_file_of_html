@@ -151,7 +151,7 @@
       <div class="btn-row">
         <button class="btn btn--primary" id="startBtn">开始游戏</button>
       </div>
-      <div class="hint">← → / 拖动 移动战机<br>自动开火 · P 暂停</div>
+      <div class="hint">← → / 拖动 移动战机<br>自动开火 · P 暂停 · M 静音</div>
     </div>
 
     <!-- 暂停 -->
@@ -568,6 +568,7 @@
       laser: {state:'idle', t:0, x:W/2},
     };
     shake = 5;
+    sfx('boss');
   }
   function updateBoss(dt){
     boss.t += dt;
@@ -595,6 +596,7 @@
       if(boss.phase===3 && boss.volley % 2 === 0){   // P3 激光改为每 2 轮一次（更频繁）
         boss.laser = {state:'charge', t:0, x:player.x};   // 每 3 轮弹幕插入一次激光
         boss.shootCD = 2.9;                                // 覆盖 充能1.2+发射0.9+冷却0.6 + 余量
+        sfx('charge');
         return;
       }
       boss.pattern = (boss.pattern+1)%2;
@@ -623,7 +625,7 @@
   function updateBossLaser(dt){
     const L = boss.laser; L.t += dt;
     if(L.state==='charge'){
-      if(L.t >= 1.2){ L.state='fire'; L.t=0; shake=Math.max(shake,4); }
+      if(L.t >= 1.2){ L.state='fire'; L.t=0; shake=Math.max(shake,4); sfx('laser'); }
     } else if(L.state==='fire'){
       if(player.inv<=0){
         const bx0=L.x-9, bx1=L.x+9;   // 与渲染火束宽度(18)一致
@@ -639,12 +641,109 @@
     for(let i=0;i<10;i++) spawnExplosion(boss.x+boss.w/2+(Math.random()-0.5)*boss.w, boss.y+boss.h/2+(Math.random()-0.5)*boss.h, true);
     score += 2000*bossStage; boss = null; bossStage++; bossNextAt = elapsed + 50;
     ebullets = []; shake = 12; updateHUD();
+    sfx('bossdie');
+  }
+
+  // ── 音效：Web Audio 程序化合成（零外部资源，8-bit 像素风）──
+  let AC = null, sfxOn = true;
+  function ensureAudio(){
+    if(!AC){
+      try{ AC = new (window.AudioContext || window.webkitAudioContext)(); }catch(_){}
+    }
+    if(AC && AC.state === 'suspended') AC.resume();
+  }
+  // 单音合成：type=波形 | f0→f1 频率扫动 | dur 时长 | vol 音量 | delay 延迟秒
+  function tone(type, f0, f1, dur, vol, delay){
+    if(!AC) return;
+    const t0 = AC.currentTime + (delay||0);
+    const o = AC.createOscillator(), g = AC.createGain();
+    o.type = type;
+    o.frequency.setValueAtTime(Math.max(1,f0), t0);
+    if(f1 !== f0) o.frequency.exponentialRampToValueAtTime(Math.max(1,f1), t0+dur);
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(vol, t0+0.005);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0+dur);
+    o.connect(g); g.connect(AC.destination);
+    o.start(t0); o.stop(t0+dur+0.03);
+  }
+  // 噪声爆音（爆炸质感）：低通滤波衰减
+  function noiseBurst(dur, vol, cutoff, delay){
+    if(!AC) return;
+    const t0 = AC.currentTime + (delay||0);
+    const n = Math.max(1, Math.floor(AC.sampleRate*dur));
+    const buf = AC.createBuffer(1, n, AC.sampleRate);
+    const d = buf.getChannelData(0);
+    for(let i=0;i<n;i++) d[i] = (Math.random()*2-1)*(1-i/n);
+    const src = AC.createBufferSource(); src.buffer = buf;
+    const f = AC.createBiquadFilter(); f.type='lowpass'; f.frequency.value = cutoff||900;
+    const g = AC.createGain(); g.gain.setValueAtTime(vol, t0);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0+dur);
+    src.connect(f); f.connect(g); g.connect(AC.destination);
+    src.start(t0);
+  }
+  const SFX = {
+    ui:       ()=> tone('square', 660, 990, 0.07, 0.12),
+    shoot:    ()=> tone('square', 940, 320, 0.06, 0.05),
+    ehit:     ()=> tone('square', 300, 540, 0.08, 0.14),
+    edie:     ()=>{ tone('square', 430, 60, 0.22, 0.2); noiseBurst(0.18, 0.16, 900); },
+    phit:     ()=>{ tone('sawtooth', 230, 55, 0.32, 0.28); noiseBurst(0.3, 0.2, 700); },
+    bhit:     ()=> tone('square', 190, 270, 0.07, 0.14),
+    boss:     ()=>{ tone('sawtooth', 55, 120, 0.9, 0.22); tone('square', 120, 240, 0.9, 0.1, 0.05); noiseBurst(0.6, 0.08, 400); },
+    charge:   ()=> tone('sawtooth', 180, 720, 1.1, 0.12),
+    laser:    ()=>{ tone('sawtooth', 130, 42, 0.9, 0.24); tone('square', 920, 180, 0.9, 0.07); noiseBurst(0.8, 0.06, 500); },
+    bossdie:  ()=>{ for(let i=0;i<5;i++){ tone('square', 520-i*85, 60, 0.3, 0.16, i*0.08); noiseBurst(0.25, 0.14, 800, i*0.08); } tone('triangle', 660, 660, 0.5, 0.12, 0.45); tone('triangle', 880, 880, 0.5, 0.1, 0.6); },
+    combo:    (c)=>{ const base = 440 + Math.min(c,20)*40; tone('square', base, base*1.05, 0.09, 0.16); tone('square', base*1.5, base*1.5, 0.12, 0.12, 0.04); },
+    gameover: ()=>{ tone('square', 440, 440, 0.18, 0.2); tone('square', 330, 330, 0.18, 0.2, 0.18); tone('square', 220, 140, 0.5, 0.22, 0.36); },
+  };
+  let lastShootAt = 0;
+  function sfx(name, arg){
+    if(!sfxOn) return;
+    if(!AC){ ensureAudio(); if(!AC) return; }
+    if(name==='shoot'){ const t = performance.now(); if(t-lastShootAt < 70) return; lastShootAt = t; } // 高频射速防堆叠
+    const fn = SFX[name]; if(!fn) return;
+    try{ fn(arg); }catch(_){}
+  }
+
+  // ── BGM：8-bit 琶音循环（Lookahead 调度，零外部资源，随 sfxOn 静音）──
+  const BGM_BPM = 128, BGM_STEP = 60/BGM_BPM/2;      // 8 分音符步长 ≈ 0.234s
+  const BGM_CHORDS = [                                // Am → F → C → G，每和弦一小节
+    [220.00, 261.63, 329.63],
+    [174.61, 220.00, 261.63],
+    [261.63, 329.63, 392.00],
+    [196.00, 246.94, 293.66],
+  ];
+  const BGM_BASS = [110.00, 87.31, 130.81, 98.00];    // 根音低八度（A2 F2 C3 G2）
+  let bgmOn = false, bgmTimer = null, bgmStep = 0, bgmNextT = 0;
+  function bgmStart(){
+    if(bgmOn || !sfxOn) return;
+    ensureAudio(); if(!AC) return;
+    bgmOn = true; bgmStep = 0; bgmNextT = AC.currentTime + 0.08;
+    bgmTimer = setInterval(bgmSchedule, 25);
+  }
+  function bgmStop(){
+    bgmOn = false;
+    if(bgmTimer){ clearInterval(bgmTimer); bgmTimer = null; }
+  }
+  function bgmSchedule(){
+    if(!AC || !bgmOn) return;
+    while(bgmNextT < AC.currentTime + 0.12){         // 提前 120ms 调度，节拍精确
+      bgmStep %= 32;
+      const bar = bgmStep >> 3, pos = bgmStep & 7;
+      const delay = Math.max(0, bgmNextT - AC.currentTime);
+      const arp = BGM_CHORDS[bar][[0,1,2,1][pos & 3]];                       // 琶音：三角波，[0,1,2,1] 循环
+      tone('triangle', arp, arp, 0.12, 0.05, delay);
+      if(pos === 0 || pos === 4) tone('square', BGM_BASS[bar], BGM_BASS[bar], 0.2, 0.06, delay); // 贝斯：每 2 拍根音
+      if(pos % 2 === 1) noiseBurst(0.03, 0.02, 6000, delay);                 // 踩镲：奇数步
+      bgmNextT += BGM_STEP;
+      bgmStep++;
+    }
   }
 
   // ── 输入事件 ──
   window.addEventListener('keydown', e=>{
     if(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown',' '].includes(e.key)) e.preventDefault();
     keys[e.key] = true;
+    if((e.key==='m'||e.key==='M')){ sfxOn = !sfxOn; ensureAudio(); if(sfxOn){ sfx('ui'); if(state==='playing') bgmStart(); } else bgmStop(); }
     if((e.key==='p'||e.key==='P'||e.key==='Escape')){
       if(state==='playing') doPause();
       else if(state==='paused') doResume();
@@ -675,16 +774,16 @@
     if(s==='paused'){ show(el.pause); el.hud.classList.remove('hidden'); }
     if(s==='over'){ show(el.over); }
   }
-  function startGame(){ reset(); setState('playing'); }
-  function doPause(){ if(state==='playing') setState('paused'); }
-  function doResume(){ if(state==='paused') setState('playing'); }
+  function startGame(){ ensureAudio(); sfx('ui'); bgmStart(); reset(); setState('playing'); }
+  function doPause(){ if(state==='playing'){ ensureAudio(); sfx('ui'); bgmStop(); setState('paused'); } }
+  function doResume(){ if(state==='paused'){ ensureAudio(); sfx('ui'); bgmStart(); setState('playing'); } }
 
   document.getElementById('startBtn').onclick = startGame;
   document.getElementById('againBtn').onclick = startGame;
   document.getElementById('resumeBtn').onclick = doResume;
   document.getElementById('restartBtn').onclick = startGame;
-  document.getElementById('quitBtn').onclick = ()=>setState('menu');
-  document.getElementById('menuBtn').onclick = ()=>setState('menu');
+  document.getElementById('quitBtn').onclick = ()=>{ ensureAudio(); sfx('ui'); bgmStop(); setState('menu'); };
+  document.getElementById('menuBtn').onclick = ()=>{ ensureAudio(); sfx('ui'); bgmStop(); setState('menu'); };
   el.pauseBtn.onclick = ()=>{ if(state==='playing') doPause(); else if(state==='paused') doResume(); };
 
   // ── 更新 ──
@@ -734,6 +833,7 @@
       const bSpeed = 260 + elapsed*1.9;
       bullets.push({x:player.x-6, y:player.y-player.h/2, vy:-bSpeed});
       bullets.push({x:player.x+4, y:player.y-player.h/2, vy:-bSpeed});
+      sfx('shoot');
     }
 
     // 子弹
@@ -780,9 +880,12 @@
             e.dead = true;
             score += Math.round(e.score * comboMult());
             combo++; comboTimer = 1.2;
+            if(combo>=2) sfx('combo', combo);
             spawnExplosion(e.x+e.w/2, e.y+e.h/2, e.type===2);
+            sfx('edie');
           } else {
             e.hitFlash = 0.09;   // 非致命命中：白闪反馈，体现「精英扛揍」
+            sfx('ehit');
           }
           break;
         }
@@ -797,6 +900,7 @@
         if(b.x+3 > boss.x && b.x < boss.x+boss.w && b.y < boss.y+boss.h && b.y+8 > boss.y){
           b.dead = true; boss.hp--; score += 8;
           spawnExplosion(b.x, boss.y+boss.h-4, false);
+          sfx('bhit');
           if(boss.hp<=0){ killBoss(); break; }
         }
       }
@@ -844,6 +948,7 @@
     shake = 6;
     spawnExplosion(player.x, player.y, true);
     el.redflash.classList.remove('hit'); void el.redflash.offsetWidth; el.redflash.classList.add('hit');
+    sfx('phit');
     updateHUD();
     if(lives<=0) gameOver();
   }
@@ -853,6 +958,8 @@
     el.finalScore.textContent = score;
     el.bestScore.textContent = best;
     setState('over');
+    bgmStop();
+    sfx('gameover');
   }
 
   // ── 渲染 ──
