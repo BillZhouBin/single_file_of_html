@@ -364,7 +364,7 @@
   const STATE = { MENU:0, PLAY:1, PAUSE:2, OVER:3 };
   let state = STATE.MENU;
   let balloon, fences, gems, bolts, powerups, particles, floatTexts;
-  let score, best, spawnTimer, elapsed, inv, invColor, fx;
+  let score, best, spawnTimer, elapsed, inv, invColor, curLevel, fx;
   best = parseInt(localStorage.getItem('hotAirBalloon.best')||'0',10) || 0;
 
   function reset(){
