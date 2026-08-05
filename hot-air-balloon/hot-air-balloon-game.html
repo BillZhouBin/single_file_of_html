@@ -141,6 +141,7 @@
   }
   .title .em{ color:var(--accent); }
   .sub-en{ font-family:var(--font-display); font-size:9px; color:var(--ink-faint); letter-spacing:2px; }
+  .hint-mute{ font-family:var(--font-display); font-size:8px; color:var(--ink-faint); letter-spacing:1px; }
   .subtitle{ font-size:var(--fs-body); color:var(--ink-dim); max-width:260px; line-height:1.25; }
 
   .best-card{
@@ -211,6 +212,7 @@
         <div class="title">热气球<span class="em">大冒险</span></div>
         <div class="sub-en">HOT AIR BALLOON</div>
       </div>
+      <div class="hint-mute">M 键静音 · 含音效与 BGM</div>
       <div class="best-card"><span class="k">BEST</span><span class="v" id="menuBest">0</span></div>
       <div class="tips">
         <div class="tip"><span class="ic" style="background:var(--live)"></span>彩色闪电 · 染色无敌</div>
@@ -223,6 +225,7 @@
     <!-- 暂停 -->
     <div class="overlay hidden" id="pause">
       <div class="title">已暂停</div>
+      <div class="hint-mute">M 键静音</div>
       <div class="row">
         <button class="btn" id="resumeBtn">继续</button>
         <button class="btn btn--ghost" id="restartBtn1">重新开始</button>
@@ -367,7 +370,7 @@
   function reset(){
     balloon = { x:W/2, y:H-64, w:24, h:28, speed:230, vx:0, tilt:0 };
     fences=[]; gems=[]; bolts=[]; powerups=[]; particles=[]; floatTexts=[];
-    score=0; spawnTimer=0; elapsed=0; inv=0; invColor=null;
+    score=0; spawnTimer=0; elapsed=0; inv=0; invColor=null; curLevel=0;
     fx={ slow:0, magnet:0, double:0 };
   }
 
@@ -425,6 +428,7 @@
       if(state===STATE.PLAY) pause();
       else if(state===STATE.PAUSE) resume();
     }
+    if(e.key==='m'||e.key==='M'){ ensureAudio(); sfxOn=!sfxOn; applyMute(); }
   });
   window.addEventListener('keyup', e=>{ keys[e.key]=false; });
 
@@ -450,6 +454,107 @@
   function toLogicalX(clientX){
     const r = cv.getBoundingClientRect();
     return (clientX - r.left) / r.width * W;
+  }
+
+  // ── 音频：Web Audio 程序化合成（零外部资源）──
+  let AC=null, masterGain=null, bgmGain=null, sfxOn=true;
+  let bgmTimer=null, bgmStep=0, bgmNextTime=0;
+
+  function ensureAudio(){
+    if(AC){ if(AC.state==='suspended') AC.resume(); return; }
+    try{
+      AC = new (window.AudioContext||window.webkitAudioContext)();
+      masterGain = AC.createGain();
+      masterGain.gain.value = sfxOn ? 1 : 0;
+      masterGain.connect(AC.destination);
+      bgmGain = AC.createGain();
+      bgmGain.gain.value = sfxOn ? 0.5 : 0;
+      bgmGain.connect(masterGain);
+    }catch(_){ AC=null; }
+  }
+  function applyMute(){
+    if(!AC) return;
+    const t=AC.currentTime;
+    masterGain.gain.setTargetAtTime(sfxOn?1:0, t, 0.01);
+    bgmGain.gain.setTargetAtTime(sfxOn?0.5:0, t, 0.01);
+  }
+
+  function tone(freq, dur, type, vol, when, slideTo, dest){
+    if(!AC) return;
+    const t0 = when || AC.currentTime;
+    const o = AC.createOscillator();
+    const g = AC.createGain();
+    o.type = type||'square';
+    o.frequency.setValueAtTime(freq, t0);
+    if(slideTo) o.frequency.exponentialRampToValueAtTime(slideTo, t0+dur);
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(vol||0.2, t0+0.008);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0+dur);
+    o.connect(g); g.connect(dest||masterGain);
+    o.start(t0); o.stop(t0+dur+0.02);
+  }
+  function noise(dur, vol, when, hp, dest){
+    if(!AC) return;
+    const t0 = when || AC.currentTime;
+    const n = Math.floor(AC.sampleRate*dur);
+    const buf = AC.createBuffer(1, n, AC.sampleRate);
+    const d = buf.getChannelData(0);
+    for(let i=0;i<n;i++) d[i] = (Math.random()*2-1)*(1 - i/n);
+    const src = AC.createBufferSource(); src.buffer=buf;
+    const g = AC.createGain(); g.gain.value = vol||0.2;
+    const node = (hp)? (()=>{ const f=AC.createBiquadFilter(); f.type='highpass'; f.frequency.value=hp; src.connect(f); return f; })() : src;
+    node.connect(g); g.connect(dest||masterGain);
+    src.start(t0);
+  }
+
+  const SFX = {
+    ui(){ tone(523, 0.08, 'square', 0.16); },
+    gem(type){ const f=[660,784,880][type]||660; tone(f,0.10,'triangle',0.20); tone(f*2,0.07,'sine',0.07, AC?AC.currentTime+0.02:0); },
+    bolt(){ if(!AC) return; const t=AC.currentTime;
+      tone(523,0.10,'triangle',0.20,t); tone(659,0.10,'triangle',0.20,t+0.07); tone(784,0.14,'triangle',0.22,t+0.14); },
+    power(){ if(!AC) return; const t=AC.currentTime; tone(440,0.09,'square',0.16,t); tone(660,0.12,'square',0.16,t+0.08); },
+    near(){ tone(1200,0.06,'sine',0.14); },
+    hit(){ if(!AC) return; const t=AC.currentTime; tone(170,0.18,'sawtooth',0.20,t); noise(0.18,0.16,t,300); },
+    level(){ if(!AC) return; const t=AC.currentTime; tone(587,0.10,'triangle',0.18,t); tone(880,0.12,'triangle',0.18,t+0.08); },
+    gameover(){ if(!AC) return; const t=AC.currentTime;
+      tone(440,0.16,'square',0.18,t); tone(349,0.16,'square',0.18,t+0.15); tone(262,0.32,'square',0.18,t+0.32); },
+  };
+  function sfx(name, arg){
+    if(!sfxOn) return;
+    if(!AC){ ensureAudio(); if(!AC) return; }
+    const fn = SFX[name]; if(!fn) return;
+    try{ fn(arg); }catch(_){}
+  }
+
+  // ── BGM：轻飘五声音阶琶音（暖墨风，比飞机大战柔和）──
+  const BGM_BPM = 96;
+  const BGM_STEP = 60/BGM_BPM/2;                       // 8 分音符
+  const CHORDS = [ [262,330,392], [294,349,440], [330,392,494], [262,330,392] ];  // C Dm Em C
+  function bgmStart(){
+    ensureAudio();
+    if(!AC || bgmTimer) return;
+    bgmStep=0; bgmNextTime=AC.currentTime+0.06;
+    bgmTimer=setInterval(bgmSched, 25);
+  }
+  function bgmStop(){ if(bgmTimer){ clearInterval(bgmTimer); bgmTimer=null; } }
+  function bgmSched(){
+    if(!AC) return;
+    while(bgmNextTime < AC.currentTime + 0.12){
+      const bar = Math.floor(bgmStep/8) % CHORDS.length;
+      const s = bgmStep % 8;
+      const chord = CHORDS[bar];
+      if(s % 2 === 0){                                  // 琶音（三角波，柔和）
+        const note = chord[(s/2) % chord.length];
+        tone(note, BGM_STEP*0.9, 'triangle', 0.09, bgmNextTime, null, bgmGain);
+      }
+      if(s===0 || s===4){                               // 贝斯（正弦）
+        tone(chord[0]/2, BGM_STEP*1.6, 'sine', 0.11, bgmNextTime, null, bgmGain);
+      }
+      if(s % 2 === 1){                                  // 柔和高镲
+        noise(0.04, 0.025, bgmNextTime, 6000, bgmGain);
+      }
+      bgmStep++; bgmNextTime += BGM_STEP;
+    }
   }
 
   // ── 碰撞 ──
@@ -522,13 +627,13 @@
       // 险胜擦边：纵向重叠但水平缝隙 < 10px（每根栅栏仅触发一次）
       if(!f.near && f.y+f.h > by && f.y < by+balloon.h){
         const gap = (bx+balloon.w <= f.x) ? (f.x-(bx+balloon.w)) : ((bx >= f.x+f.w) ? (bx-(f.x+f.w)) : -1);
-        if(gap>=0 && gap<10){ f.near=true; score+=5; pushFloat(balloon.x, balloon.y-18, '险 +5', '#ffd23f'); }
+        if(gap>=0 && gap<10){ f.near=true; score+=5; pushFloat(balloon.x, balloon.y-18, '险 +5', '#ffd23f'); sfx('near'); }
       }
       if(aabb(bx,by,balloon.w,balloon.h, f.x,f.y,f.w,f.h)){
         if(inv>0){ // 穿过并碎裂
           for(let k=0;k<8;k++) particles.push({x:f.x+Math.random()*f.w, y:f.y+Math.random()*f.h, vx:(Math.random()-0.5)*120, vy:(Math.random()-0.5)*120, life:0.4, max:0.4, c:'#8a8f9c'});
           fences.splice(i,1);
-        } else { gameOver(); return; }
+        } else { sfx('hit'); gameOver(); return; }
       }
     }
     // 宝石
@@ -541,6 +646,7 @@
         g.got=true;
         const add = (g.type===1?20:10) * (fx.double>0?2:1);
         score += add;
+        sfx('gem', g.type);
         burst(g.x, g.y, GEMS[g.type], 6);
         pushFloat(g.x, g.y-6, '+'+add, GEMS[g.type]);
         gems.splice(i,1);
@@ -552,6 +658,7 @@
       if(b.y>H+14){ bolts.splice(i,1); continue; }
       if(aabb(bx,by,balloon.w,balloon.h, b.x-6,b.y-6,12,12)){
         invColor = b.hue; inv = 4.0;
+        sfx('bolt');
         burst(b.x, b.y, b.hue, 10);
         pushFloat(b.x, b.y-6, '通电!', b.hue);
         triggerFlash(b.hue);
@@ -565,6 +672,7 @@
       if(aabb(bx,by,balloon.w,balloon.h, p.x-6,p.y-6,12,12)){
         burst(p.x, p.y, PU[p.type].color, 8);
         pushFloat(p.x, p.y-6, PU[p.type].label, PU[p.type].color);
+        sfx('power');
         applyPower(p.type);
         powerups.splice(i,1);
       }
@@ -583,6 +691,9 @@
     // 生成
     spawnTimer += dt;
     if(spawnTimer >= rowInterval()){ spawnTimer=0; spawnRow(); }
+    // 升级音效
+    const lvNow = level();
+    if(lvNow > curLevel){ curLevel = lvNow; sfx('level'); }
   }
 
   function applyPower(type){
@@ -766,15 +877,17 @@
 
   function start(){
     reset(); state=STATE.PLAY; last=0;
+    ensureAudio(); sfx('ui'); bgmStart();
     elMenuBest.textContent = best;
     menu.classList.add('hidden'); pauseEl.classList.add('hidden'); overEl.classList.add('hidden');
     elLvBar.classList.add('show');
   }
-  function pause(){ if(state!==STATE.PLAY) return; state=STATE.PAUSE; pauseEl.classList.remove('hidden'); }
-  function resume(){ if(state!==STATE.PAUSE) return; state=STATE.PLAY; last=0; pauseEl.classList.add('hidden'); }
-  function toMenu(){ state=STATE.MENU; pauseEl.classList.add('hidden'); overEl.classList.add('hidden'); menu.classList.remove('hidden'); elLvBar.classList.remove('show'); elMenuBest.textContent = best; floatTexts.length=0; particles.length=0; }
+  function pause(){ if(state!==STATE.PLAY) return; state=STATE.PAUSE; pauseEl.classList.remove('hidden'); bgmStop(); sfx('ui'); }
+  function resume(){ if(state!==STATE.PAUSE) return; state=STATE.PLAY; last=0; pauseEl.classList.add('hidden'); ensureAudio(); sfx('ui'); bgmStart(); }
+  function toMenu(){ state=STATE.MENU; pauseEl.classList.add('hidden'); overEl.classList.add('hidden'); menu.classList.remove('hidden'); elLvBar.classList.remove('show'); elMenuBest.textContent = best; floatTexts.length=0; particles.length=0; bgmStop(); sfx('ui'); }
   function gameOver(){
     state=STATE.OVER;
+    bgmStop(); sfx('gameover');
     if(score>best){ best=score; localStorage.setItem('hotAirBalloon.best', String(best)); }
     document.getElementById('finalScore').textContent=score;
     document.getElementById('finalBest').textContent=best;
@@ -789,7 +902,7 @@
   document.getElementById('restartBtn1').onclick=start;
   document.getElementById('menuBtn1').onclick=toMenu;
   document.getElementById('menuBtn2').onclick=toMenu;
-  document.getElementById('pauseBtn').onclick=()=>{ state===STATE.PLAY?pause():state===STATE.PAUSE?resume():null; };
+  document.getElementById('pauseBtn').onclick=()=>{ state===STATE.PLAY?(ensureAudio(),pause()):state===STATE.PAUSE?(ensureAudio(),resume()):null; };
 
   reset();
   requestAnimationFrame(loop);
