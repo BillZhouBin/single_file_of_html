@@ -1,0 +1,880 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>零食金币狂飙赛 · Rabbit Racing</title>
+<meta name="description" content="3 车道卡通赛车跑酷：躲交通锥、吃金币、捡道具，60 秒限时狂飙。">
+<style>
+  :root {
+    --sky-top: #4fb4ff;
+    --sky-btm: #c2ecff;
+    --grass: #7ad96e;
+    --grass-dark: #5bc24f;
+    --road: #8a8da3;
+    --road-dark: #6f7288;
+    --white: #ffffff;
+    --ink: #2a2d3d;
+    --ink-soft: #5a5e75;
+    --yellow: #ffd23f;
+    --yellow-dark: #e6b800;
+    --red: #ff5a5a;
+    --red-dark: #d63030;
+    --blue: #4facfe;
+    --blue-dark: #2c7fd1;
+    --green: #4cd97b;
+    --orange: #ff9f43;
+    --shadow: rgba(42,45,61,0.18);
+  }
+
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; }
+
+  body {
+    background: #1a1c28;
+    display: flex; align-items: center; justify-content: center;
+    font-family: ui-rounded, "PingFang SC", "Microsoft YaHei", sans-serif;
+    touch-action: none; user-select: none; -webkit-user-select: none;
+  }
+
+  #game {
+    position: relative;
+    width: min(100vw, 56.25vh); /* 9:16 portrait */
+    height: min(177.78vw, 100vh);
+    background: linear-gradient(180deg, var(--sky-top), var(--sky-btm));
+    border-radius: min(2.5vw, 2.5vh);
+    box-shadow: 0 20px 60px rgba(0,0,0,0.35);
+    overflow: hidden;
+  }
+
+  canvas { display: block; width: 100%; height: 100%; }
+
+  /* HUD */
+  .hud {
+    position: absolute; top: 0; left: 0; right: 0;
+    padding: 14px 18px;
+    display: flex; justify-content: space-between; align-items: flex-start;
+    pointer-events: none;
+    z-index: 10;
+  }
+  .hud-panel {
+    background: rgba(255,255,255,0.92);
+    border-radius: 999px;
+    padding: 8px 16px;
+    box-shadow: 0 4px 12px var(--shadow);
+    display: flex; align-items: center; gap: 8px;
+    font-weight: 800; color: var(--ink);
+  }
+  .hud-time { font-size: 18px; }
+  .hud-score { flex-direction: column; gap: 2px; padding: 8px 22px; }
+  .hud-score small { font-size: 11px; color: var(--ink-soft); letter-spacing: 1px; }
+  .hud-score big { font-size: 28px; line-height: 1; }
+
+  /* Bottom controls */
+  .controls {
+    position: absolute; bottom: 18px; left: 0; right: 0;
+    display: flex; justify-content: space-between;
+    padding: 0 22px;
+    pointer-events: none;
+    z-index: 10;
+  }
+  .ctrl-btn {
+    width: 72px; height: 72px;
+    border-radius: 50%;
+    background: rgba(0,0,0,0.28);
+    border: 3px solid rgba(255,255,255,0.45);
+    backdrop-filter: blur(4px);
+    display: flex; align-items: center; justify-content: center;
+    pointer-events: auto;
+    transition: transform .08s, background .15s;
+  }
+  .ctrl-btn:active { transform: scale(0.92); background: rgba(0,0,0,0.45); }
+  .ctrl-btn::after {
+    content: ''; width: 0; height: 0;
+    border-style: solid;
+  }
+  .ctrl-left::after { border-width: 14px 20px 14px 0; border-color: transparent var(--white) transparent transparent; }
+  .ctrl-right::after { border-width: 14px 0 14px 20px; border-color: transparent transparent transparent var(--white); }
+
+  /* Overlays */
+  .overlay {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    background: rgba(26,28,40,0.72);
+    backdrop-filter: blur(6px);
+    z-index: 30;
+    padding: 28px;
+    text-align: center;
+    transition: opacity .25s;
+  }
+  .overlay.hidden { opacity: 0; pointer-events: none; }
+
+  .menu-title {
+    font-size: clamp(28px, 7vw, 44px);
+    font-weight: 900;
+    color: var(--white);
+    text-shadow: 0 4px 0 var(--red-dark), 0 8px 20px rgba(0,0,0,0.3);
+    margin-bottom: 8px;
+  }
+  .menu-sub {
+    color: rgba(255,255,255,0.9); font-size: 16px; margin-bottom: 28px;
+    text-shadow: 0 2px 4px rgba(0,0,0,0.25);
+  }
+
+  .card {
+    background: var(--white);
+    border-radius: 22px;
+    padding: 22px 26px;
+    box-shadow: 0 12px 30px rgba(0,0,0,0.25);
+    max-width: 340px; width: 100%;
+  }
+  .tips { text-align: left; margin-bottom: 24px; }
+  .tips h3 { margin: 0 0 12px; color: var(--ink); font-size: 17px; }
+  .tip-row {
+    display: flex; align-items: center; gap: 12px;
+    margin: 10px 0; color: var(--ink-soft); font-size: 14px;
+  }
+  .tip-icon { width: 28px; height: 28px; flex-shrink: 0; border-radius: 50%; }
+
+  .btn {
+    width: 100%; border: none; outline: none;
+    padding: 16px; border-radius: 14px;
+    font-size: 20px; font-weight: 800;
+    cursor: pointer; transition: transform .08s, filter .15s;
+    box-shadow: 0 6px 0 rgba(0,0,0,0.15), 0 10px 20px rgba(0,0,0,0.15);
+  }
+  .btn:active { transform: translateY(3px); box-shadow: 0 2px 0 rgba(0,0,0,0.15); }
+  .btn-primary { background: linear-gradient(180deg, #ff8a5c, var(--red)); color: var(--white); }
+  .btn-secondary { background: linear-gradient(180deg, var(--blue), var(--blue-dark)); color: var(--white); }
+
+  .result-score { font-size: 52px; font-weight: 900; color: var(--red); margin: 8px 0; }
+  .result-best { font-size: 16px; color: var(--ink-soft); margin-bottom: 18px; }
+  .new-record {
+    display: inline-block; background: var(--yellow); color: var(--ink);
+    padding: 4px 12px; border-radius: 999px; font-size: 13px; font-weight: 800;
+    margin-bottom: 10px;
+  }
+
+  /* corner mute */
+  .mute-hint {
+    position: absolute; bottom: 104px; right: 18px;
+    background: rgba(255,255,255,0.9); color: var(--ink-soft);
+    padding: 5px 10px; border-radius: 999px; font-size: 12px; font-weight: 700;
+    pointer-events: none; z-index: 10;
+  }
+
+  /* toast */
+  .toast {
+    position: absolute; top: 22%; left: 50%; transform: translateX(-50%);
+    background: rgba(255,255,255,0.95); color: var(--ink);
+    padding: 10px 22px; border-radius: 999px; font-weight: 900; font-size: 18px;
+    box-shadow: 0 6px 18px rgba(0,0,0,0.2);
+    opacity: 0; pointer-events: none; transition: opacity .2s;
+    z-index: 20;
+  }
+  .toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+
+<div id="game">
+  <canvas id="c"></canvas>
+
+  <div class="hud" id="hud">
+    <div class="hud-panel hud-time">⏱ <span id="time">60</span>s</div>
+    <div class="hud-panel hud-score">
+      <small>分数</small>
+      <big id="score">0</big>
+    </div>
+  </div>
+
+  <div class="controls" id="controls">
+    <div class="ctrl-btn ctrl-left" id="btnLeft"></div>
+    <div class="ctrl-btn ctrl-right" id="btnRight"></div>
+  </div>
+
+  <div class="mute-hint">M 键静音</div>
+  <div class="toast" id="toast"></div>
+
+  <!-- Menu -->
+  <div class="overlay" id="menu">
+    <div class="menu-title">零食金币狂飙赛</div>
+    <div class="menu-sub">左右换道 · 狂吃金币 · 躲避路障</div>
+    <div class="card">
+      <div class="tips">
+        <h3>玩法说明</h3>
+        <div class="tip-row"><div class="tip-icon" style="background:#ffd23f"></div>金币 +10 分，多吃多赚</div>
+        <div class="tip-row"><div class="tip-icon" style="background:#ff5a5a"></div>交通锥会撞车，左右躲开</div>
+        <div class="tip-row"><div class="tip-icon" style="background:#4facfe"></div>蓝色闪电 = 加速无敌 5 秒</div>
+        <div class="tip-row"><div class="tip-icon" style="background:#eee"></div>开局护盾可抵挡一次撞击</div>
+      </div>
+      <button class="btn btn-primary" id="btnStart">点击参与 ▶</button>
+    </div>
+  </div>
+
+  <!-- Game Over -->
+  <div class="overlay hidden" id="gameOver">
+    <div class="card">
+      <div id="newRecord" class="new-record" style="display:none">🎉 NEW RECORD!</div>
+      <div style="font-size:15px;color:var(--ink-soft)">本局分数</div>
+      <div class="result-score" id="endScore">0</div>
+      <div class="result-best">历史最佳：<span id="endBest">0</span></div>
+      <button class="btn btn-primary" id="btnRestart" style="margin-bottom:12px">再玩一次</button>
+      <button class="btn btn-secondary" id="btnHome">返回大厅</button>
+    </div>
+  </div>
+
+  <!-- Revive -->
+  <div class="overlay hidden" id="revive">
+    <div class="card">
+      <div style="font-size:20px;font-weight:900;color:var(--ink);margin-bottom:8px">哎呀，撞到了！</div>
+      <div style="font-size:14px;color:var(--ink-soft);margin-bottom:22px">分享复活 或 直接结束游戏</div>
+      <button class="btn btn-primary" id="btnRevive" style="margin-bottom:12px">立即复活 ▶</button>
+      <button class="btn btn-secondary" id="btnEnd">结束游戏</button>
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+
+const W = 540, H = 1200;
+const c = document.getElementById('c');
+const ctx = c.getContext('2d');
+const dpr = Math.min(window.devicePixelRatio || 1, 2);
+c.width = W * dpr; c.height = H * dpr;
+ctx.scale(dpr, dpr);
+
+// DOM refs
+const elScore = document.getElementById('score');
+const elTime  = document.getElementById('time');
+const elMenu  = document.getElementById('menu');
+const elOver  = document.getElementById('gameOver');
+const elRevive= document.getElementById('revive');
+const elToast = document.getElementById('toast');
+const elEndScore = document.getElementById('endScore');
+const elEndBest  = document.getElementById('endBest');
+const elNewRec   = document.getElementById('newRecord');
+
+// Game constants
+const LANES = 3;
+const ROAD_W = 360;
+const ROAD_X = (W - ROAD_W) / 2;
+const LANE_W = ROAD_W / LANES;
+const LANE_C = [ROAD_X + LANE_W*0.5, ROAD_X + LANE_W*1.5, ROAD_X + LANE_W*2.5];
+const PLAYER_Y = 920;
+const PLAYER_W = 78, PLAYER_H = 94;
+
+// State
+let screen = 'menu'; // menu | play | revive | over
+let score = 0, best = 0;
+let timeLeft = 60, timeAcc = 0;
+let lane = 1, targetLane = 1, laneT = 0;
+let speed = 9, baseSpeed = 9;
+let boostTimer = 0, shieldTimer = 0;
+let objects = [], particles = [], clouds = [], sides = [];
+let spawnAcc = 0, spawnInterval = 600;
+let reviveUsed = false;
+let last = performance.now();
+let frameId;
+
+best = Number(localStorage.getItem('rabbitRacingBest') || 0);
+
+// ---------- Audio ----------
+let AC = null, sfxOn = true, bgmInterval = null, bgmNext = 0;
+
+function ensureAudio() {
+  if (!AC) {
+    try { AC = new (window.AudioContext || window.webkitAudioContext)(); }
+    catch(e){}
+  }
+  if (AC && AC.state === 'suspended') AC.resume();
+}
+
+function tone(freq, dur, type='sine', vol=0.25, when=0, slideTo=null) {
+  if (!AC || !sfxOn) return;
+  const t = when || AC.currentTime;
+  const o = AC.createOscillator();
+  const g = AC.createGain();
+  o.type = type; o.frequency.setValueAtTime(freq, t);
+  if (slideTo !== null) o.frequency.exponentialRampToValueAtTime(Math.max(20, slideTo), t + dur);
+  g.gain.setValueAtTime(vol, t);
+  g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+  o.connect(g).connect(AC.destination);
+  o.start(t); o.stop(t + dur + 0.05);
+}
+
+function noise(dur, vol=0.25, when=0) {
+  if (!AC || !sfxOn) return;
+  const t = when || AC.currentTime;
+  const len = AC.sampleRate * dur;
+  const buf = AC.createBuffer(1, len, AC.sampleRate);
+  const d = buf.getChannelData(0);
+  for (let i=0;i<len;i++) d[i] = Math.random()*2-1;
+  const src = AC.createBufferSource(); src.buffer = buf;
+  const g = AC.createGain(); g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.001, t+dur);
+  src.connect(g).connect(AC.destination); src.start(t);
+}
+
+const SFX = {
+  coin: () => { tone(880,0.12,'sine',0.22); setTimeout(()=>tone(1175,0.15,'sine',0.18),60); },
+  power:() => { tone(523,0.12,'sawtooth',0.15); setTimeout(()=>tone(784,0.15,'sawtooth',0.15),90); setTimeout(()=>tone(1047,0.25,'sawtooth',0.15),180); },
+  hit:  () => { noise(0.25,0.35); tone(150,0.25,'square',0.2,0,80); },
+  switch:()=>{ tone(440,0.06,'sine',0.12); },
+  over: () => { tone(330,0.35,'sawtooth',0.2); setTimeout(()=>tone(220,0.45,'sawtooth',0.2),180); },
+  revive:()=>{ tone(523,0.15,'sine',0.2); setTimeout(()=>tone(659,0.15,'sine',0.2),120); setTimeout(()=>tone(784,0.35,'sine',0.2),240); }
+};
+
+function sfx(name) { if(SFX[name]) SFX[name](); }
+
+function bgmStart() {
+  if (!AC || !sfxOn || bgmInterval) return;
+  bgmNext = AC.currentTime + 0.1;
+  bgmInterval = setInterval(bgmSched, 120);
+}
+function bgmStop() {
+  if (bgmInterval) { clearInterval(bgmInterval); bgmInterval = null; }
+}
+function bgmSched() {
+  if (!AC || !sfxOn) return;
+  const now = AC.currentTime;
+  while (bgmNext < now + 0.25) {
+    const t = bgmNext;
+    const beat = 0.28; // ~107 BPM
+    // bass: C - G - Am - F
+    const root = [261.6, 196.0, 220.0, 349.2][Math.floor((t*2)%4)];
+    tone(root*0.5, beat*0.9, 'triangle', 0.10, t);
+    // arp
+    const arp = [root, root*1.25, root*1.5, root*2];
+    for (let i=0;i<4;i++) tone(arp[i], beat*0.45, 'square', 0.04, t + i*beat*0.5);
+    // hihat
+    noise(0.04, 0.04, t + beat*0.5); noise(0.04, 0.04, t + beat*1.5);
+    bgmNext += beat * 2;
+  }
+}
+
+function applyMute() {
+  if (!sfxOn) bgmStop();
+  else bgmStart();
+}
+
+// ---------- Helpers ----------
+function rand(a,b){ return Math.random()*(b-a)+a; }
+function clamp(v,a,b){ return Math.max(a,Math.min(b,v)); }
+function showToast(txt) {
+  elToast.textContent = txt; elToast.classList.add('show');
+  setTimeout(()=>elToast.classList.remove('show'), 1200);
+}
+
+// ---------- Spawning ----------
+function spawnCloud() {
+  clouds.push({ x: rand(-60, W+60), y: rand(-100, H*0.45), s: rand(0.3, 0.9), w: rand(70, 130), spd: rand(8, 22) });
+}
+function spawnSide() {
+  const left = Math.random() > 0.5;
+  const type = Math.random() > 0.6 ? 'tree' : (Math.random() > 0.5 ? 'cake' : 'house');
+  sides.push({ x: left ? rand(10, ROAD_X-20) : rand(ROAD_X+ROAD_W+20, W-10), y: -120, type, scale: rand(0.7, 1.1), left });
+}
+function spawnObject() {
+  const laneIdx = Math.floor(Math.random()*LANES);
+  const r = Math.random();
+  let type = 'coin';
+  if (r > 0.78) type = 'cone';
+  else if (r > 0.68) type = 'power';
+  objects.push({ lane: laneIdx, y: -80, type, collected: false, rot: rand(0,Math.PI*2), wobble: rand(0,Math.PI*2) });
+}
+
+// ---------- Init world ----------
+function initWorld() {
+  clouds = []; sides = [];
+  for (let i=0;i<8;i++) spawnCloud();
+  for (let i=0;i<6;i++) sides.push({ x: Math.random()>0.5?rand(10,ROAD_X-20):rand(ROAD_X+ROAD_W+20,W-10), y: rand(-100,H), type: ['tree','cake','house'][Math.floor(rand(0,3))], scale: rand(0.7,1.1), left: true });
+}
+initWorld();
+
+// ---------- Reset / start ----------
+function resetGame() {
+  score = 0; timeLeft = 60; timeAcc = 0;
+  lane = 1; targetLane = 1; laneT = 0;
+  speed = baseSpeed; boostTimer = 0; shieldTimer = 3;
+  objects = []; particles = []; spawnAcc = 0; spawnInterval = 650;
+  reviveUsed = false;
+  elScore.textContent = '0'; elTime.textContent = '60';
+}
+
+function start() {
+  ensureAudio(); bgmStart();
+  resetGame();
+  screen = 'play';
+  elMenu.classList.add('hidden');
+  elOver.classList.add('hidden');
+  elRevive.classList.add('hidden');
+  last = performance.now();
+  if (frameId) cancelAnimationFrame(frameId);
+  frameId = requestAnimationFrame(loop);
+}
+
+function pauseForRevive() {
+  screen = 'revive';
+  bgmStop();
+  elRevive.classList.remove('hidden');
+}
+
+function revive() {
+  ensureAudio(); sfx('revive'); bgmStart();
+  reviveUsed = true;
+  shieldTimer = 4;
+  // remove nearby cones in current lane
+  objects = objects.filter(o => !(o.type==='cone' && Math.abs(o.y - PLAYER_Y) < 220));
+  screen = 'play';
+  elRevive.classList.add('hidden');
+  showToast('复活！');
+  last = performance.now();
+}
+
+function gameOver() {
+  screen = 'over';
+  bgmStop(); sfx('over');
+  if (score > best) { best = score; localStorage.setItem('rabbitRacingBest', best); elNewRec.style.display = 'inline-block'; }
+  else elNewRec.style.display = 'none';
+  elEndScore.textContent = score;
+  elEndBest.textContent = best;
+  elOver.classList.remove('hidden');
+}
+
+function goHome() {
+  screen = 'menu';
+  elOver.classList.add('hidden');
+  elRevive.classList.add('hidden');
+  elMenu.classList.remove('hidden');
+}
+
+// ---------- Input ----------
+function moveLeft()  { if (screen==='play' && targetLane>0){ targetLane--; laneT=0; sfx('switch'); } }
+function moveRight() { if (screen==='play' && targetLane<LANES-1){ targetLane++; laneT=0; sfx('switch'); } }
+
+document.getElementById('btnStart').addEventListener('click', start);
+document.getElementById('btnRestart').addEventListener('click', start);
+document.getElementById('btnHome').addEventListener('click', goHome);
+document.getElementById('btnRevive').addEventListener('click', revive);
+document.getElementById('btnEnd').addEventListener('click', gameOver);
+
+document.getElementById('btnLeft').addEventListener('pointerdown', moveLeft);
+document.getElementById('btnRight').addEventListener('pointerdown', moveRight);
+
+window.addEventListener('keydown', e => {
+  if (e.key === 'ArrowLeft'  || e.key === 'a' || e.key === 'A') moveLeft();
+  if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') moveRight();
+  if (e.key === 'm' || e.key === 'M') { sfxOn = !sfxOn; applyMute(); showToast(sfxOn?'音效开启':'静音'); }
+  if (e.key === ' ' && screen==='menu') start();
+});
+
+// swipe
+let sx = 0, sy = 0;
+const gameEl = document.getElementById('game');
+gameEl.addEventListener('touchstart', e => { sx=e.touches[0].clientX; sy=e.touches[0].clientY; }, {passive:false});
+gameEl.addEventListener('touchmove', e => e.preventDefault(), {passive:false});
+gameEl.addEventListener('touchend', e => {
+  const dx = e.changedTouches[0].clientX - sx;
+  const dy = e.changedTouches[0].clientY - sy;
+  if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 30) {
+    dx > 0 ? moveRight() : moveLeft();
+  }
+}, {passive:false});
+
+// ---------- Particles ----------
+function burst(x, y, color, count=10) {
+  for (let i=0;i<count;i++) {
+    const a = rand(0, Math.PI*2);
+    const sp = rand(2, 7);
+    particles.push({ x, y, vx: Math.cos(a)*sp, vy: Math.sin(a)*sp-3, life: 1, color });
+  }
+}
+function floatText(x, y, txt, color) {
+  particles.push({ x, y, txt, vy: -2, life: 1, color, isText: true });
+}
+
+// ---------- Update ----------
+function update(dt) {
+  // lane interpolation
+  laneT = Math.min(1, laneT + dt * 10);
+  const curX = LANE_C[lane];
+  const tgtX = LANE_C[targetLane];
+  if (lane !== targetLane) {
+    // simple ease
+  }
+  // actually update lane position for rendering
+  const playerX = curX + (tgtX - curX) * (0.5 - 0.5*Math.cos(laneT*Math.PI));
+
+  // timers
+  if (shieldTimer > 0) shieldTimer -= dt;
+  if (boostTimer > 0) {
+    boostTimer -= dt;
+    speed = baseSpeed * 1.45;
+  } else {
+    speed = baseSpeed + (60 - timeLeft) * 0.06;
+  }
+
+  // world scroll
+  const scroll = speed * dt * 60;
+  clouds.forEach(cl => { cl.x += cl.spd * dt * 0.15; if (cl.x > W + cl.w) cl.x = -cl.w; });
+  sides.forEach(s => { s.y += scroll; });
+  sides = sides.filter(s => s.y < H + 120);
+  if (Math.random() < 0.08) spawnSide();
+
+  // spawn objects
+  spawnAcc += dt * 1000;
+  spawnInterval = Math.max(320, 650 - (60-timeLeft)*6);
+  if (spawnAcc > spawnInterval) {
+    spawnAcc = 0;
+    spawnObject();
+    // sometimes spawn a second coin in adjacent lane
+    if (Math.random() < 0.35) {
+      const extra = { lane: Math.floor(rand(0,LANES)), y: -80 - rand(60,140), type: 'coin', collected: false, rot: rand(0,Math.PI*2), wobble: rand(0,Math.PI*2) };
+      objects.push(extra);
+    }
+  }
+
+  // update objects
+  objects.forEach(o => { o.y += scroll; o.rot += dt*3; o.wobble += dt*5; });
+  objects = objects.filter(o => o.y < H + 100 && !o.collected);
+
+  // collision
+  const px = playerX, py = PLAYER_Y;
+  objects.forEach(o => {
+    if (o.collected) return;
+    const ox = LANE_C[o.lane], oy = o.y;
+    const dx = ox - px, dy = oy - py;
+    const dist = Math.hypot(dx, dy);
+    const hitR = 45;
+    if (dist < hitR) {
+      if (o.type === 'coin') {
+        o.collected = true;
+        score += 10;
+        elScore.textContent = score;
+        sfx('coin');
+        burst(ox, oy, '#ffd23f', 8);
+        floatText(ox, oy - 20, '+10', '#ff9f00');
+      } else if (o.type === 'power') {
+        o.collected = true;
+        boostTimer = 5; shieldTimer = 5;
+        score += 30;
+        elScore.textContent = score;
+        sfx('power');
+        burst(ox, oy, '#4facfe', 12);
+        floatText(ox, oy - 30, '加速无敌！', '#2c7fd1');
+      } else if (o.type === 'cone') {
+        if (shieldTimer > 0 || boostTimer > 0) {
+          // shield absorbs
+          shieldTimer = 0; boostTimer = 0; o.collected = true;
+          sfx('hit'); burst(ox, oy, '#ffffff', 10);
+          showToast('护盾抵消！');
+        } else {
+          o.collected = true;
+          sfx('hit'); burst(ox, oy, '#ff5a5a', 12);
+          if (!reviveUsed) pauseForRevive();
+          else gameOver();
+        }
+      }
+    }
+  });
+
+  // particles
+  particles.forEach(p => {
+    if (p.isText) { p.y += p.vy; }
+    else { p.x += p.vx; p.y += p.vy; p.vy += 0.25; }
+    p.life -= dt * 1.5;
+  });
+  particles = particles.filter(p => p.life > 0);
+
+  // game timer
+  timeAcc += dt;
+  if (timeAcc >= 1) {
+    timeAcc -= 1; timeLeft--;
+    elTime.textContent = Math.max(0, timeLeft);
+    if (timeLeft <= 0) gameOver();
+  }
+
+  // keep lane in sync after interpolation completes
+  if (laneT >= 1) lane = targetLane;
+}
+
+// ---------- Drawing ----------
+function drawRoundedRect(x, y, w, h, r, fill, stroke) {
+  ctx.beginPath();
+  ctx.roundRect(x, y, w, h, r);
+  if (fill) { ctx.fillStyle = fill; ctx.fill(); }
+  if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = 3; ctx.stroke(); }
+}
+
+function drawCloud(cl) {
+  ctx.fillStyle = 'rgba(255,255,255,0.92)';
+  const s = cl.s;
+  ctx.save(); ctx.translate(cl.x, cl.y); ctx.scale(s, s);
+  ctx.beginPath();
+  ctx.arc(0, 0, 24, 0, Math.PI*2);
+  ctx.arc(28, -4, 32, 0, Math.PI*2);
+  ctx.arc(58, 4, 24, 0, Math.PI*2);
+  ctx.arc(30, 16, 22, 0, Math.PI*2);
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawSide(s) {
+  ctx.save(); ctx.translate(s.x, s.y); ctx.scale(s.scale, s.scale);
+  if (s.type === 'tree') {
+    ctx.fillStyle = '#5bc24f';
+    ctx.beginPath(); ctx.arc(0, -18, 22, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(-14, -4, 16, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(14, -4, 16, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#8b5a3c';
+    ctx.fillRect(-6, 0, 12, 22);
+  } else if (s.type === 'cake') {
+    ctx.fillStyle = '#ff8fab';
+    ctx.beginPath(); ctx.arc(0, -10, 24, Math.PI, 0); ctx.fill();
+    ctx.fillStyle = '#fff0f3';
+    ctx.fillRect(-24, -10, 48, 16);
+    ctx.fillStyle = '#ff5a8a';
+    for (let i=-18;i<=18;i+=12) ctx.beginPath(), ctx.arc(i, -18, 4, 0, Math.PI*2), ctx.fill();
+    ctx.fillStyle = '#8b5a3c';
+    ctx.fillRect(-8, 6, 16, 14);
+  } else {
+    ctx.fillStyle = '#ffd8a8';
+    ctx.fillRect(-22, -24, 44, 38);
+    ctx.fillStyle = '#ff9f60';
+    ctx.beginPath(); ctx.moveTo(-26, -24); ctx.lineTo(0, -44); ctx.lineTo(26, -24); ctx.fill();
+    ctx.fillStyle = '#7ad96e';
+    ctx.fillRect(-8, -12, 16, 16);
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(-16, -8, 10, 10);
+  }
+  ctx.restore();
+}
+
+function drawRoad() {
+  // grass
+  ctx.fillStyle = 'var(--grass)';
+  ctx.fillRect(0, 0, ROAD_X, H);
+  ctx.fillRect(ROAD_X + ROAD_W, 0, W - ROAD_X - ROAD_W, H);
+  ctx.fillStyle = 'var(--grass-dark)';
+  ctx.fillRect(ROAD_X - 8, 0, 8, H);
+  ctx.fillRect(ROAD_X + ROAD_W, 0, 8, H);
+
+  // road
+  ctx.fillStyle = 'var(--road)';
+  ctx.fillRect(ROAD_X, 0, ROAD_W, H);
+
+  // lane dashed lines
+  ctx.strokeStyle = 'rgba(255,255,255,0.65)';
+  ctx.lineWidth = 6; ctx.setLineDash([32, 32]); ctx.lineDashOffset = -(performance.now()/10)%64;
+  for (let i=1;i<LANES;i++) {
+    const x = ROAD_X + i*LANE_W;
+    ctx.beginPath(); ctx.moveTo(x, -32); ctx.lineTo(x, H); ctx.stroke();
+  }
+  ctx.setLineDash([]);
+
+  // side curbs
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(ROAD_X + 4, 0, 6, H);
+  ctx.fillRect(ROAD_X + ROAD_W - 10, 0, 6, H);
+}
+
+function drawSky() {
+  const g = ctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0, 'var(--sky-top)');
+  g.addColorStop(0.55, '#8fd6ff');
+  g.addColorStop(1, 'var(--sky-btm)');
+  ctx.fillStyle = g; ctx.fillRect(0,0,W,H);
+
+  // sun
+  ctx.fillStyle = 'rgba(255,235,120,0.9)';
+  ctx.beginPath(); ctx.arc(W-80, 90, 42, 0, Math.PI*2); ctx.fill();
+  ctx.fillStyle = 'rgba(255,245,180,0.5)';
+  ctx.beginPath(); ctx.arc(W-80, 90, 58, 0, Math.PI*2); ctx.fill();
+
+  // distant mountains
+  ctx.fillStyle = '#4b9bd1';
+  ctx.beginPath(); ctx.moveTo(0, 260); ctx.lineTo(90, 140); ctx.lineTo(200, 230); ctx.lineTo(300, 110); ctx.lineTo(420, 220); ctx.lineTo(540, 150); ctx.lineTo(540, 320); ctx.lineTo(0, 320); ctx.fill();
+  ctx.fillStyle = '#6ab5e0';
+  ctx.beginPath(); ctx.moveTo(0, 300); ctx.lineTo(120, 210); ctx.lineTo(260, 290); ctx.lineTo(400, 190); ctx.lineTo(540, 280); ctx.lineTo(540, 360); ctx.lineTo(0, 360); ctx.fill();
+
+  clouds.forEach(drawCloud);
+}
+
+function drawCone(o) {
+  const x = LANE_C[o.lane], y = o.y;
+  ctx.save(); ctx.translate(x, y);
+  // base shadow
+  ctx.fillStyle = 'rgba(0,0,0,0.18)';
+  ctx.beginPath(); ctx.ellipse(0, 18, 22, 7, 0, 0, Math.PI*2); ctx.fill();
+  // cone
+  ctx.fillStyle = '#ff5a5a';
+  ctx.beginPath(); ctx.moveTo(-18, 16); ctx.lineTo(0, -22); ctx.lineTo(18, 16); ctx.closePath(); ctx.fill();
+  // stripes
+  ctx.fillStyle = '#fff';
+  ctx.beginPath(); ctx.moveTo(-11, 4); ctx.lineTo(0, -8); ctx.lineTo(11, 4); ctx.lineTo(8, 8); ctx.lineTo(0, -2); ctx.lineTo(-8, 8); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = '#fff';
+  ctx.beginPath(); ctx.moveTo(-15, 12); ctx.lineTo(0, -2); ctx.lineTo(15, 12); ctx.lineTo(12, 16); ctx.lineTo(0, 4); ctx.lineTo(-12, 16); ctx.closePath(); ctx.fill();
+  ctx.restore();
+}
+
+function drawCoin(o) {
+  const x = LANE_C[o.lane] + Math.sin(o.wobble)*4, y = o.y;
+  ctx.save(); ctx.translate(x, y);
+  // shadow
+  ctx.fillStyle = 'rgba(0,0,0,0.15)';
+  ctx.beginPath(); ctx.ellipse(0, 16, 16, 5, 0, 0, Math.PI*2); ctx.fill();
+  // coin body
+  ctx.fillStyle = '#ffd23f';
+  ctx.beginPath(); ctx.arc(0, 0, 16, 0, Math.PI*2); ctx.fill();
+  ctx.strokeStyle = '#e6b800'; ctx.lineWidth = 3; ctx.stroke();
+  ctx.fillStyle = '#fff5c2';
+  ctx.beginPath(); ctx.arc(-4, -4, 5, 0, Math.PI*2); ctx.fill();
+  // yen symbol
+  ctx.fillStyle = '#b88600';
+  ctx.font = 'bold 18px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText('¥', 1, 1);
+  ctx.restore();
+}
+
+function drawPower(o) {
+  const x = LANE_C[o.lane], y = o.y;
+  ctx.save(); ctx.translate(x, y);
+  ctx.fillStyle = 'rgba(0,0,0,0.15)';
+  ctx.beginPath(); ctx.ellipse(0, 20, 18, 6, 0, 0, Math.PI*2); ctx.fill();
+  // can body
+  ctx.fillStyle = '#4facfe';
+  drawRoundedRect(-14, -20, 28, 36, 6, '#4facfe');
+  ctx.fillStyle = '#2c7fd1';
+  ctx.fillRect(-14, -22, 28, 8);
+  // lightning
+  ctx.fillStyle = '#ffd23f';
+  ctx.beginPath();
+  ctx.moveTo(2, -14); ctx.lineTo(-6, 0); ctx.lineTo(2, 0); ctx.lineTo(-2, 12); ctx.lineTo(8, -4); ctx.lineTo(0, -4); ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawPlayer(x) {
+  const y = PLAYER_Y;
+  ctx.save(); ctx.translate(x, y);
+
+  // shadow
+  ctx.fillStyle = 'rgba(0,0,0,0.2)';
+  ctx.beginPath(); ctx.ellipse(0, 42, 42, 12, 0, 0, Math.PI*2); ctx.fill();
+
+  // shield bubble
+  if (shieldTimer > 0 || boostTimer > 0) {
+    const pulse = 1 + Math.sin(performance.now()/120)*0.06;
+    ctx.save(); ctx.scale(pulse, pulse);
+    ctx.strokeStyle = `rgba(255,255,255,${0.55 + Math.sin(performance.now()/100)*0.15})`;
+    ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.arc(0, -8, 58, 0, Math.PI*2); ctx.stroke();
+    ctx.fillStyle = 'rgba(150,220,255,0.12)';
+    ctx.beginPath(); ctx.arc(0, -8, 58, 0, Math.PI*2); ctx.fill();
+    ctx.restore();
+  }
+
+  // car body (yellow)
+  ctx.fillStyle = '#ffd23f';
+  drawRoundedRect(-38, -22, 76, 46, 16, '#ffd23f');
+  ctx.fillStyle = '#ffee8a';
+  ctx.fillRect(-32, -18, 64, 18);
+  // bumper
+  ctx.fillStyle = '#ff5a5a';
+  ctx.fillRect(-38, 12, 76, 12);
+  // headlights
+  ctx.fillStyle = '#fff7c2';
+  ctx.beginPath(); ctx.arc(-24, -4, 7, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(24, -4, 7, 0, Math.PI*2); ctx.fill();
+  // wheels
+  ctx.fillStyle = '#2a2d3d';
+  ctx.beginPath(); ctx.arc(-26, 26, 12, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(26, 26, 12, 0, Math.PI*2); ctx.fill();
+  ctx.fillStyle = '#888';
+  ctx.beginPath(); ctx.arc(-26, 26, 5, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(26, 26, 5, 0, Math.PI*2); ctx.fill();
+
+  // rabbit head
+  ctx.fillStyle = '#fff';
+  ctx.beginPath(); ctx.ellipse(0, -52, 28, 24, 0, 0, Math.PI*2); ctx.fill();
+  // ears
+  ctx.beginPath(); ctx.ellipse(-14, -78, 9, 22, -0.25, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(14, -78, 9, 22, 0.25, 0, Math.PI*2); ctx.fill();
+  ctx.fillStyle = '#ffd6e5';
+  ctx.beginPath(); ctx.ellipse(-14, -78, 4, 14, -0.25, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(14, -78, 4, 14, 0.25, 0, Math.PI*2); ctx.fill();
+  // face
+  ctx.fillStyle = '#2a2d3d';
+  ctx.beginPath(); ctx.arc(-10, -56, 4, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(10, -56, 4, 0, Math.PI*2); ctx.fill();
+  ctx.fillStyle = '#ff8fab';
+  ctx.beginPath(); ctx.arc(0, -48, 6, 0, Math.PI*2); ctx.fill();
+  ctx.strokeStyle = '#2a2d3d'; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.arc(0, -46, 7, 0.2, Math.PI-0.2); ctx.stroke();
+
+  // speed lines if boosting
+  if (boostTimer > 0) {
+    ctx.strokeStyle = 'rgba(255,255,255,0.7)'; ctx.lineWidth = 3;
+    for (let i=0;i<3;i++) {
+      ctx.beginPath(); ctx.moveTo(-50, -10+i*20); ctx.lineTo(-80 - rand(0,20), -10+i*20); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(50, -5+i*20); ctx.lineTo(80 + rand(0,20), -5+i*20); ctx.stroke();
+    }
+  }
+
+  ctx.restore();
+}
+
+function drawParticles() {
+  particles.forEach(p => {
+    ctx.globalAlpha = Math.max(0, p.life);
+    if (p.isText) {
+      ctx.fillStyle = p.color; ctx.font = 'bold 20px sans-serif';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(p.txt, p.x, p.y);
+    } else {
+      ctx.fillStyle = p.color;
+      ctx.beginPath(); ctx.arc(p.x, p.y, 4 * p.life, 0, Math.PI*2); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  });
+}
+
+function draw() {
+  ctx.clearRect(0,0,W,H);
+  drawSky();
+  drawRoad();
+  sides.forEach(drawSide);
+
+  // sort objects by y so nearer ones drawn last
+  const sorted = [...objects].sort((a,b)=>a.y-b.y);
+  sorted.forEach(o => {
+    if (o.type === 'cone') drawCone(o);
+    else if (o.type === 'coin') drawCoin(o);
+    else drawPower(o);
+  });
+
+  // compute player x
+  const curX = LANE_C[lane];
+  const tgtX = LANE_C[targetLane];
+  const px = curX + (tgtX - curX) * (0.5 - 0.5*Math.cos(laneT*Math.PI));
+  drawPlayer(px);
+
+  drawParticles();
+}
+
+// ---------- Loop ----------
+function loop(now) {
+  if (screen !== 'play') return;
+  const dt = Math.min((now - last) / 1000, 0.05);
+  last = now;
+  update(dt);
+  draw();
+  frameId = requestAnimationFrame(loop);
+}
+
+// Initial draw for menu background
+draw();
+</script>
+</body>
+</html>
