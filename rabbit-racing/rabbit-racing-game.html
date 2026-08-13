@@ -449,6 +449,7 @@ function revive() {
   elRevive.classList.add('hidden');
   showToast('复活！');
   last = performance.now();
+  frameId = requestAnimationFrame(loop);
 }
 
 function gameOver() {
