@@ -245,6 +245,25 @@ const dpr = Math.min(window.devicePixelRatio || 1, 2);
 c.width = W * dpr; c.height = H * dpr;
 ctx.scale(dpr, dpr);
 
+// roundRect 兼容（部分老旧 webview 未实现）
+if (typeof CanvasRenderingContext2D !== 'undefined' && !CanvasRenderingContext2D.prototype.roundRect) {
+  CanvasRenderingContext2D.prototype.roundRect = function (x, y, w, h, r) {
+    if (typeof r === 'number') r = [r, r, r, r];
+    else if (Array.isArray(r)) { while (r.length < 4) r.push(r[0]); }
+    const [tl, tr, br, bl] = r;
+    this.moveTo(x + tl, y);
+    this.lineTo(x + w - tr, y);
+    this.arcTo(x + w, y, x + w, y + tr, tr);
+    this.lineTo(x + w, y + h - br);
+    this.arcTo(x + w, y + h, x + w - br, y + h, br);
+    this.lineTo(x + bl, y + h);
+    this.arcTo(x, y + h, x, y + h - bl, bl);
+    this.lineTo(x, y + tl);
+    this.arcTo(x, y, x + tl, y, tl);
+    return this;
+  };
+}
+
 // DOM refs
 const elScore = document.getElementById('score');
 const elTime  = document.getElementById('time');
@@ -653,15 +672,15 @@ function drawSide(s) {
 
 function drawRoad() {
   // grass
-  ctx.fillStyle = 'var(--grass)';
+  ctx.fillStyle = '#7ad96e';
   ctx.fillRect(0, 0, ROAD_X, H);
   ctx.fillRect(ROAD_X + ROAD_W, 0, W - ROAD_X - ROAD_W, H);
-  ctx.fillStyle = 'var(--grass-dark)';
+  ctx.fillStyle = '#5bc24f';
   ctx.fillRect(ROAD_X - 8, 0, 8, H);
   ctx.fillRect(ROAD_X + ROAD_W, 0, 8, H);
 
   // road
-  ctx.fillStyle = 'var(--road)';
+  ctx.fillStyle = '#8a8da3';
   ctx.fillRect(ROAD_X, 0, ROAD_W, H);
 
   // lane dashed lines
@@ -681,9 +700,9 @@ function drawRoad() {
 
 function drawSky() {
   const g = ctx.createLinearGradient(0,0,0,H);
-  g.addColorStop(0, 'var(--sky-top)');
+  g.addColorStop(0, '#4fb4ff');
   g.addColorStop(0.55, '#8fd6ff');
-  g.addColorStop(1, 'var(--sky-btm)');
+  g.addColorStop(1, '#c2ecff');
   ctx.fillStyle = g; ctx.fillRect(0,0,W,H);
 
   // sun
