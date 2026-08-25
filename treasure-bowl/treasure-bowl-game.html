@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>聚宝盆 · Treasure Bowl</title>
-<meta name="description" content="竖屏休闲：拖动聚宝盆接住天上掉落的元宝铜钱，小心躲开炸弹。60 秒限时挑战最高分。">
+<meta name="description" content="竖屏休闲：拖动聚宝盆接住天上掉落的元宝铜钱，小心躲开炸弹。支持无限 / 限时（60 秒）双模式，默认无限。">
 <style>
   :root {
     --gold:      #ffd23f;
@@ -147,6 +147,19 @@
   }
   .toast.show { opacity: 1; }
 
+  /* mode toggle */
+  .mode-toggle { display: flex; gap: 8px; justify-content: center; margin: 12px 0 4px; }
+  .mode-btn {
+    flex: 1; max-width: 150px; padding: 9px 0; border: 2px solid rgba(120,30,30,0.25);
+    border-radius: 999px; background: #fff; color: #8a4b2b;
+    font-size: 15px; font-weight: 800; cursor: pointer; transition: all .15s;
+  }
+  .mode-btn.active {
+    background: #c0392b; color: #fff; border-color: transparent;
+    box-shadow: 0 4px 12px rgba(120,30,30,0.25);
+  }
+  .mode-label { text-align: center; font-size: 12px; color: #9a6a3a; margin-top: 2px; }
+
   @media (prefers-reduced-motion: reduce) {
     .overlay, .toast, .btn { transition: none !important; }
   }
@@ -179,6 +192,11 @@
         <div class="tip-row"><div class="tip-icon" style="background:#e23b3b"></div>红色福袋 +1 条命</div>
         <div class="tip-row"><div class="tip-icon" style="background:#2a2d3d"></div>黑色炸弹 -1 条命，别接！</div>
       </div>
+      <div class="mode-toggle">
+        <button class="mode-btn active" id="btnInf">♾ 无限</button>
+        <button class="mode-btn" id="btnTimed">⏱ 限时 60s</button>
+      </div>
+      <div class="mode-label">默认无限模式 · 限时模式到时即结算</div>
       <button class="btn btn-primary" id="btnStart">开始接宝 ▶</button>
     </div>
   </div>
@@ -247,6 +265,8 @@ const elEndScore= document.getElementById('endScore');
 const elEndBest = document.getElementById('endBest');
 const elNewRec  = document.getElementById('newRecord');
 const gameEl    = document.getElementById('game');
+const elBtnInf   = document.getElementById('btnInf');
+const elBtnTimed = document.getElementById('btnTimed');
 
 // Game constants
 const BOWL_Y   = H - 130;
@@ -264,6 +284,8 @@ let items = [], particles = [], clouds = [];
 let spawnAcc = 0, spawnInterval = 760;
 let bombChance = 0.13;
 let invulnTimer = 0;
+let mode = 'infinite'; // 'infinite' | 'timed'
+let played = 0;        // 已游玩秒数（无限模式用于难度与显示）
 let last = performance.now();
 let frameId;
 
@@ -380,13 +402,15 @@ initWorld();
 
 // ---------- Reset / start ----------
 function resetGame() {
-  score = 0; timeLeft = DURATION; timeAcc = 0; lives = 3;
+  score = 0; timeLeft = DURATION; timeAcc = 0; lives = 3; played = 0;
   bowlX = W / 2; targetX = W / 2;
   fallSpeed = 240;
   items = []; particles = [];
   spawnAcc = 0; spawnInterval = 760; bombChance = 0.13;
   invulnTimer = 0;
-  elScore.textContent = '0'; elTime.textContent = DURATION; updateLives();
+  elScore.textContent = '0';
+  elTime.textContent = (mode === 'timed') ? DURATION : '0';
+  updateLives();
 }
 
 function start() {
@@ -447,6 +471,15 @@ document.getElementById('btnHome').addEventListener('click', goHome);
 document.getElementById('btnResume').addEventListener('click', resumeGame);
 document.getElementById('btnQuit').addEventListener('click', goHome);
 elPauseBtn.addEventListener('click', () => { screen === 'play' ? pauseGame() : resumeGame(); });
+
+function setMode(m) {
+  mode = m;
+  elBtnInf.classList.toggle('active', m === 'infinite');
+  elBtnTimed.classList.toggle('active', m === 'timed');
+}
+elBtnInf.addEventListener('click', () => setMode('infinite'));
+elBtnTimed.addEventListener('click', () => setMode('timed'));
+setMode('infinite');
 
 window.addEventListener('keydown', e => {
   if (e.key === 'ArrowLeft'  || e.key === 'a' || e.key === 'A') moveBy(-40);
@@ -515,7 +548,7 @@ function update(dt) {
   if (invulnTimer > 0) invulnTimer -= dt;
 
   // difficulty by elapsed time
-  const elapsed = DURATION - timeLeft;
+  const elapsed = (mode === 'timed') ? (DURATION - timeLeft) : played;
   fallSpeed = Math.min(520, 240 + elapsed * 4.5);
   spawnInterval = Math.max(420, 760 - elapsed * 5);
   bombChance = Math.min(0.30, 0.13 + elapsed * 0.0028);
@@ -553,11 +586,17 @@ function update(dt) {
   particles = particles.filter(p => p.life > 0);
 
   // timer
+  played += dt;
   timeAcc += dt;
   if (timeAcc >= 1) {
-    timeAcc -= 1; timeLeft--;
-    elTime.textContent = Math.max(0, timeLeft);
-    if (timeLeft <= 0) gameOver();
+    timeAcc -= 1;
+    if (mode === 'timed') {
+      timeLeft--;
+      elTime.textContent = Math.max(0, timeLeft);
+      if (timeLeft <= 0) { gameOver(); return; }
+    } else {
+      elTime.textContent = Math.floor(played);
+    }
   }
 }
 

@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>零食金币狂飙赛 · Rabbit Racing</title>
-<meta name="description" content="3 车道卡通赛车跑酷：躲交通锥、吃金币、捡道具，60 秒限时狂飙。">
+<meta name="description" content="3 车道卡通赛车跑酷：躲交通锥、吃金币、捡道具。支持无限 / 限时（60 秒）双模式，默认无限。">
 <style>
   :root {
     --sky-top: #4fb4ff;
@@ -173,6 +173,19 @@
     z-index: 20;
   }
   .toast.show { opacity: 1; }
+
+  /* mode toggle */
+  .mode-toggle { display: flex; gap: 8px; justify-content: center; margin: 12px 0 4px; }
+  .mode-btn {
+    flex: 1; max-width: 150px; padding: 9px 0; border: 2px solid rgba(0,0,0,0.12);
+    border-radius: 999px; background: #fff; color: var(--ink-soft);
+    font-size: 15px; font-weight: 800; cursor: pointer; transition: all .15s;
+  }
+  .mode-btn.active {
+    background: var(--red); color: #fff; border-color: transparent;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.18);
+  }
+  .mode-label { text-align: center; font-size: 12px; color: var(--ink-soft); margin-top: 2px; }
 </style>
 </head>
 <body>
@@ -208,6 +221,11 @@
         <div class="tip-row"><div class="tip-icon" style="background:#4facfe"></div>蓝色闪电 = 加速无敌 5 秒</div>
         <div class="tip-row"><div class="tip-icon" style="background:#eee"></div>开局护盾可抵挡一次撞击</div>
       </div>
+      <div class="mode-toggle">
+        <button class="mode-btn active" id="btnInf">♾ 无限</button>
+        <button class="mode-btn" id="btnTimed">⏱ 限时 60s</button>
+      </div>
+      <div class="mode-label">默认无限模式 · 限时模式到时即结算</div>
       <button class="btn btn-primary" id="btnStart">点击参与 ▶</button>
     </div>
   </div>
@@ -274,6 +292,8 @@ const elToast = document.getElementById('toast');
 const elEndScore = document.getElementById('endScore');
 const elEndBest  = document.getElementById('endBest');
 const elNewRec   = document.getElementById('newRecord');
+const elBtnInf   = document.getElementById('btnInf');
+const elBtnTimed = document.getElementById('btnTimed');
 
 // Game constants
 const LANES = 3;
@@ -294,6 +314,8 @@ let boostTimer = 0, shieldTimer = 0;
 let objects = [], particles = [], clouds = [], sides = [];
 let spawnAcc = 0, spawnInterval = 600;
 let reviveUsed = false;
+let mode = 'infinite'; // 'infinite' | 'timed'
+let played = 0;        // 已游玩秒数（无限模式用于难度与显示）
 let last = performance.now();
 let frameId;
 
@@ -413,12 +435,13 @@ initWorld();
 
 // ---------- Reset / start ----------
 function resetGame() {
-  score = 0; timeLeft = 60; timeAcc = 0;
+  score = 0; timeLeft = 60; timeAcc = 0; played = 0;
   lane = 1; targetLane = 1; laneT = 0;
   speed = baseSpeed; boostTimer = 0; shieldTimer = 3;
   objects = []; particles = []; spawnAcc = 0; spawnInterval = 650;
   reviveUsed = false;
-  elScore.textContent = '0'; elTime.textContent = '60';
+  elScore.textContent = '0';
+  elTime.textContent = (mode === 'timed') ? '60' : '0';
 }
 
 function start() {
@@ -479,6 +502,15 @@ document.getElementById('btnHome').addEventListener('click', goHome);
 document.getElementById('btnRevive').addEventListener('click', revive);
 document.getElementById('btnEnd').addEventListener('click', gameOver);
 
+function setMode(m) {
+  mode = m;
+  elBtnInf.classList.toggle('active', m === 'infinite');
+  elBtnTimed.classList.toggle('active', m === 'timed');
+}
+elBtnInf.addEventListener('click', () => setMode('infinite'));
+elBtnTimed.addEventListener('click', () => setMode('timed'));
+setMode('infinite');
+
 document.getElementById('btnLeft').addEventListener('pointerdown', moveLeft);
 document.getElementById('btnRight').addEventListener('pointerdown', moveRight);
 
@@ -528,11 +560,13 @@ function update(dt) {
 
   // timers
   if (shieldTimer > 0) shieldTimer -= dt;
+  played += dt;
+  const diff = Math.min(mode === 'timed' ? (60 - timeLeft) : played, 60);
   if (boostTimer > 0) {
     boostTimer -= dt;
     speed = baseSpeed * 1.45;
   } else {
-    speed = baseSpeed + (60 - timeLeft) * 0.06;
+    speed = baseSpeed + diff * 0.06;
   }
 
   // world scroll
@@ -544,7 +578,7 @@ function update(dt) {
 
   // spawn objects
   spawnAcc += dt * 1000;
-  spawnInterval = Math.max(320, 650 - (60-timeLeft)*6);
+  spawnInterval = Math.max(320, 650 - diff*6);
   if (spawnAcc > spawnInterval) {
     spawnAcc = 0;
     spawnObject();
@@ -610,9 +644,14 @@ function update(dt) {
   // game timer
   timeAcc += dt;
   if (timeAcc >= 1) {
-    timeAcc -= 1; timeLeft--;
-    elTime.textContent = Math.max(0, timeLeft);
-    if (timeLeft <= 0) gameOver();
+    timeAcc -= 1;
+    if (mode === 'timed') {
+      timeLeft--;
+      elTime.textContent = Math.max(0, timeLeft);
+      if (timeLeft <= 0) { gameOver(); return; }
+    } else {
+      elTime.textContent = Math.floor(played);
+    }
   }
 
   // keep lane in sync after interpolation completes
