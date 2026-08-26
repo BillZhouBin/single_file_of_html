@@ -112,8 +112,8 @@
 
   <div class="gauge">
     <svg viewBox="0 0 200 120" id="svg">
-      <path d="M 10 100 A 90 90 0 0 1 100 10" fill="none" stroke="var(--bad)" stroke-width="14" stroke-linecap="round" opacity=".9"/>
-      <path d="M 100 10 A 90 90 0 0 1 190 100" fill="none" stroke="var(--ok)" stroke-width="14" stroke-linecap="round" opacity=".9"/>
+      <path d="M 10 100 A 90 90 0 0 1 181.1 60.9" fill="none" stroke="var(--bad)" stroke-width="14" stroke-linecap="round" opacity=".9"/>
+      <path d="M 181.1 60.9 A 90 90 0 0 1 190 100" fill="none" stroke="var(--ok)" stroke-width="14" stroke-linecap="round" opacity=".95"/>
       <line x1="100" y1="100" x2="100" y2="14" stroke="rgba(255,255,255,.25)" stroke-width="1"/>
       <g id="needle">
         <line x1="100" y1="100" x2="100" y2="20" stroke="var(--gold)" stroke-width="4" stroke-linecap="round"/>
@@ -202,6 +202,7 @@
   };
 
   var target=null, pending=null, sweeping=false, stopped=false, angle=0, phase=0, rafId=0;
+  var OK_FROM = 90 - 180/7;                 // 达标区起点：右端约 1/7 圆弧（≈25.7°）
 
   function saveRun(){ lsSet(K_RUN, run); }
   function refreshStats(){
@@ -255,7 +256,7 @@
     if(!sweeping || stopped) return;
     sweeping=false; stopped=true;
     if(rafId){ cancelAnimationFrame(rafId); rafId=0; }
-    var zoneOk = angle>=0;                  // right half = 达标
+    var zoneOk = angle>=OK_FROM;            // 仅右端约 1/7 小弧 = 达标
     var punish = run.failStreak>=4;
     var modType, pool, mod;
     if(zoneOk && !punish){ modType='buff'; pool=target.buffs; }
