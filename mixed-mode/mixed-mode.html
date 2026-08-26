@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>无限竞速混合 · 小游戏合集</title>
+<style>
+  :root{
+    --bg0:#070a16; --bg1:#160d2e; --ink:#eaf0ff; --dim:#9aa6d6;
+    --ok:#39e0a0; --bad:#ff5d6c; --gold:#ffd86b; --neon:#7cf0ff;
+    --card:#121a33; --line:rgba(124,240,255,.25);
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+  html,body{margin:0;height:100%;}
+  body{
+    font-family:'Segoe UI',system-ui,'PingFang SC','Microsoft YaHei',sans-serif;
+    background:
+      radial-gradient(1200px 600px at 50% -10%, #2a1a55 0%, transparent 60%),
+      radial-gradient(800px 500px at 90% 110%, #14324a 0%, transparent 55%),
+      linear-gradient(160deg, var(--bg0), var(--bg1));
+    color:var(--ink); min-height:100%; display:flex; flex-direction:column;
+    align-items:center; padding:18px 14px 40px; overflow-x:hidden;
+  }
+  .wrap{width:100%; max-width:560px; display:flex; flex-direction:column; gap:18px;}
+  .topbar{display:flex; align-items:center; justify-content:space-between; gap:10px;}
+  .brand{font-size:13px; letter-spacing:.18em; color:var(--neon); text-transform:uppercase;}
+  .stats{display:flex; gap:10px;}
+  .chip{background:var(--card); border:1px solid var(--line); border-radius:999px;
+    padding:6px 14px; font-size:13px; color:var(--dim);}
+  .chip b{color:var(--ink); font-variant-numeric:tabular-nums;}
+  h1{margin:2px 0 0; font-size:26px; font-weight:800; letter-spacing:.02em;
+    background:linear-gradient(90deg,var(--neon),var(--gold)); -webkit-background-clip:text;
+    background-clip:text; color:transparent; text-align:center;}
+  .sub{text-align:center; color:var(--dim); font-size:13px; margin-top:-6px;}
+
+  /* wheel */
+  .wheel{display:grid; grid-template-columns:repeat(4,1fr); gap:10px;}
+  .gcard{position:relative; background:var(--card); border:1px solid rgba(255,255,255,.08);
+    border-radius:16px; padding:12px 8px 10px; text-align:center; transition:.25s;
+    opacity:.55; transform:scale(.96);}
+  .gcard .ic{font-size:30px; line-height:1; filter:drop-shadow(0 4px 8px rgba(0,0,0,.4));}
+  .gcard .nm{font-size:12px; margin-top:6px; color:var(--dim); line-height:1.25;}
+  .gcard .obj{font-size:11px; margin-top:4px; color:var(--neon); opacity:0;}
+  .gcard.target{opacity:1; transform:scale(1.04); border-color:var(--gc,var(--neon));
+    box-shadow:0 0 0 2px var(--gc,var(--neon)), 0 10px 30px -8px var(--gc,var(--neon));}
+  .gcard.target .obj{opacity:1;}
+  .gcard.target::after{content:'◤ 本关目标'; position:absolute; top:-9px; left:50%;
+    transform:translateX(-50%); font-size:10px; letter-spacing:.1em; color:var(--bg0);
+    background:var(--gc,var(--neon)); padding:2px 8px; border-radius:999px; white-space:nowrap;}
+
+  /* gauge */
+  .gauge{position:relative; display:flex; flex-direction:column; align-items:center; gap:6px;
+    background:var(--card); border:1px solid var(--line); border-radius:20px; padding:14px 10px 10px;}
+  .gauge svg{width:260px; max-width:80vw; height:auto; touch-action:manipulation;}
+  .glabel{position:absolute; bottom:14px; width:100%; display:flex; justify-content:space-between;
+    padding:0 26px; font-size:12px; pointer-events:none;}
+  .glabel .l{color:var(--bad);} .glabel .r{color:var(--ok);}
+  .needle-tip{transition:none;}
+  .verdict{font-size:15px; font-weight:700; min-height:20px; text-align:center;}
+  .verdict.ok{color:var(--ok);} .verdict.bad{color:var(--bad);}
+
+  .btn{display:inline-flex; align-items:center; justify-content:center; gap:8px;
+    font:inherit; font-weight:700; cursor:pointer; border:none; border-radius:14px;
+    padding:14px 20px; color:#06121f; background:linear-gradient(90deg,var(--neon),var(--gold));
+    box-shadow:0 8px 24px -8px var(--neon); transition:.15s; user-select:none;}
+  .btn:active{transform:translateY(1px);}
+  .btn.full{width:100%;}
+  .btn.ghost{background:transparent; color:var(--ink); border:1px solid var(--line);
+    box-shadow:none;}
+  .btn[disabled]{opacity:.4; pointer-events:none;}
+  .hint{text-align:center; color:var(--dim); font-size:12px;}
+
+  /* overlays */
+  .overlay{position:fixed; inset:0; background:rgba(5,8,20,.86); backdrop-filter:blur(6px);
+    display:none; align-items:center; justify-content:center; padding:20px; z-index:30;}
+  .overlay.show{display:flex;}
+  .panel{width:100%; max-width:380px; background:var(--card); border:1px solid var(--line);
+    border-radius:22px; padding:26px 22px; text-align:center; box-shadow:0 20px 60px -20px #000;}
+  .panel h2{margin:0 0 6px; font-size:30px;}
+  .panel .big{font-size:46px; font-weight:800; margin:6px 0;
+    background:linear-gradient(90deg,var(--neon),var(--gold)); -webkit-background-clip:text;
+    background-clip:text; color:transparent;}
+  .panel p{color:var(--dim); margin:6px 0 18px; font-size:14px; line-height:1.5;}
+  .panel .row{display:flex; gap:10px;}
+  .fcol{display:flex; flex-direction:column; gap:12px;}
+  .warn{display:none; text-align:center; color:var(--bad); font-size:12px; font-weight:700;
+    letter-spacing:.06em; border:1px dashed var(--bad); border-radius:12px; padding:8px;
+    background:rgba(255,93,108,.08);}
+  .warn.show{display:block;}
+  .modtag{display:inline-block; font-size:12px; padding:3px 10px; border-radius:999px;
+    margin-top:4px; font-weight:700;}
+  .modtag.buff{color:var(--ok); background:rgba(57,224,160,.12); border:1px solid rgba(57,224,160,.4);}
+  .modtag.debuff{color:var(--bad); background:rgba(255,93,108,.12); border:1px solid rgba(255,93,108,.4);}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="topbar">
+    <div class="brand">MIXED · 无限竞速</div>
+    <div class="stats">
+      <div class="chip">RUN <b id="runScore">0</b></div>
+      <div class="chip">第 <b id="runRound">1</b> 关</div>
+      <div class="chip">最佳 <b id="runBest">0</b></div>
+    </div>
+  </div>
+  <h1>无限竞速混合</h1>
+  <div class="sub">随机进入一款游戏 · 弧形指针判定加成 · 无限闯关直到失败</div>
+
+  <div class="wheel" id="wheel"></div>
+
+  <div class="warn" id="warn">⚠ 惩罚回合：已连续未达标，本轮随机强制一款游戏并必定带惩罚</div>
+
+  <div class="gauge">
+    <svg viewBox="0 0 200 120" id="svg">
+      <path d="M 10 100 A 90 90 0 0 1 100 10" fill="none" stroke="var(--bad)" stroke-width="14" stroke-linecap="round" opacity=".9"/>
+      <path d="M 100 10 A 90 90 0 0 1 190 100" fill="none" stroke="var(--ok)" stroke-width="14" stroke-linecap="round" opacity=".9"/>
+      <line x1="100" y1="100" x2="100" y2="14" stroke="rgba(255,255,255,.25)" stroke-width="1"/>
+      <g id="needle">
+        <line x1="100" y1="100" x2="100" y2="20" stroke="var(--gold)" stroke-width="4" stroke-linecap="round"/>
+        <circle cx="100" cy="20" r="6" fill="var(--gold)"/>
+      </g>
+      <circle cx="100" cy="100" r="8" fill="#fff"/>
+    </svg>
+    <div class="glabel"><span class="l">◀ 未达标</span><span class="r">达标 ▶</span></div>
+    <div class="verdict" id="verdict">指针扫动中…点击 / 空格 停止</div>
+  </div>
+
+  <button class="btn full" id="actionBtn">停止判定</button>
+  <div class="hint">玩法：每关随机高亮一款游戏 → 指针扫动时停止 → 停在「达标」获得能力加成，停在「未达标」获得惩罚 → 进入该游戏完成目标即过关，失败则本轮结束。</div>
+</div>
+
+<!-- success overlay -->
+<div class="overlay" id="ovWin">
+  <div class="panel">
+    <h2 style="color:var(--ok)">本关成功！</h2>
+    <div class="big" id="winGain">+0</div>
+    <p id="winText">累计得分上升，准备进入下一关随机游戏。</p>
+    <button class="btn full" id="winNext">继续 ▶</button>
+  </div>
+</div>
+
+<!-- failed overlay -->
+<div class="overlay" id="ovLose">
+  <div class="panel">
+    <h2 style="color:var(--bad)">FAILED</h2>
+    <div class="big" id="loseScore">0</div>
+    <p id="loseText">本轮挑战未达标，混合竞速结束。</p>
+    <div class="row">
+      <button class="btn full" id="loseRetry">重新开始</button>
+      <a class="btn ghost" style="flex:0 0 auto; text-decoration:none;" href="../index.html">合集</a>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  "use strict";
+  var GAMES = [
+    {id:'plane', name:'像素飞机大战', icon:'✈️', file:'../plane-game/plane-war-game.html', color:'#ff7a59',
+      obj:'活过 60 秒', chal:'pw_survive',
+      buffs:[{c:'pw_life',t:'+1 命'},{c:'pw_fire',t:'射速+30%'},{c:'pw_slow',t:'敌机减速'}],
+      debuffs:[{c:'pw_life-',t:'-1 命'},{c:'pw_fast',t:'敌机加速'},{c:'pw_weak',t:'射速-30%'}]},
+    {id:'balloon', name:'热气球大冒险', icon:'🎈', file:'../hot-air-balloon/hot-air-balloon-game.html', color:'#caa86a',
+      obj:'收集 12 宝石', chal:'hb_gems',
+      buffs:[{c:'hb_inv',t:'无敌+2s'},{c:'hb_slow',t:'栅栏减速'},{c:'hb_wide',t:'判定加宽'}],
+      debuffs:[{c:'hb_inv-',t:'无敌-1s'},{c:'hb_fast',t:'栅栏加速'},{c:'hb_narrow',t:'判定变窄'}]},
+    {id:'rabbit', name:'零食金币狂飙赛', icon:'🐰', file:'../rabbit-racing/rabbit-racing-game.html', color:'#ff5fa2',
+      obj:'吃 25 金币', chal:'rr_coins',
+      buffs:[{c:'rr_life',t:'护盾+2s'},{c:'rr_slow',t:'交通锥减速'},{c:'rr_wide',t:'车身加宽'}],
+      debuffs:[{c:'rr_life-',t:'开局无盾'},{c:'rr_fast',t:'交通锥加速'},{c:'rr_narrow',t:'车身变窄'}]},
+    {id:'bowl', name:'聚宝盆', icon:'🏺', file:'../treasure-bowl/treasure-bowl-game.html', color:'#e8b84b',
+      obj:'接 15 元宝', chal:'tb_catch',
+      buffs:[{c:'tb_wide',t:'盆加宽'},{c:'tb_lessbomb',t:'炸弹减少'},{c:'tb_life',t:'+1 命'}],
+      debuffs:[{c:'tb_narrow',t:'盆变窄'},{c:'tb_morebomb',t:'炸弹增多'},{c:'tb_life-',t:'-1 命'}]}
+  ];
+
+  var K_RUN='mm_run', K_PEND='mm_pending', K_RES='mm_result';
+  function lsGet(k){ try{return JSON.parse(localStorage.getItem(k));}catch(e){return null;} }
+  function lsSet(k,v){ try{localStorage.setItem(k,JSON.stringify(v));}catch(e){} }
+  function lsDel(k){ try{localStorage.removeItem(k);}catch(e){} }
+
+  var run = lsGet(K_RUN) || {score:0, round:1, failStreak:0, best:0};
+  run.best = run.best || 0;
+
+  var els = {
+    wheel:document.getElementById('wheel'),
+    runScore:document.getElementById('runScore'),
+    runRound:document.getElementById('runRound'),
+    runBest:document.getElementById('runBest'),
+    warn:document.getElementById('warn'),
+    needle:document.getElementById('needle'),
+    verdict:document.getElementById('verdict'),
+    action:document.getElementById('actionBtn'),
+    ovWin:document.getElementById('ovWin'),
+    winGain:document.getElementById('winGain'),
+    winText:document.getElementById('winText'),
+    winNext:document.getElementById('winNext'),
+    ovLose:document.getElementById('ovLose'),
+    loseScore:document.getElementById('loseScore'),
+    loseText:document.getElementById('loseText'),
+    loseRetry:document.getElementById('loseRetry')
+  };
+
+  var target=null, pending=null, sweeping=false, stopped=false, angle=0, phase=0, rafId=0;
+
+  function saveRun(){ lsSet(K_RUN, run); }
+  function refreshStats(){
+    els.runScore.textContent=run.score;
+    els.runRound.textContent=run.round;
+    els.runBest.textContent=run.best;
+  }
+
+  function renderWheel(){
+    els.wheel.innerHTML='';
+    GAMES.forEach(function(g){
+      var c=document.createElement('div');
+      c.className='gcard'+(g===target?' target':'');
+      c.style.setProperty('--gc', g.color);
+      c.innerHTML='<div class="ic">'+g.icon+'</div><div class="nm">'+g.name+'</div>'+
+        '<div class="obj">目标：'+g.obj+'</div>';
+      els.wheel.appendChild(c);
+    });
+  }
+
+  function pick(arr){ return arr[Math.floor(Math.random()*arr.length)]; }
+
+  function startWheel(){
+    stopped=false; sweeping=true;
+    pending=null;
+    // punishment round?
+    var punish = run.failStreak>=4;
+    els.warn.classList.toggle('show', punish);
+    target = pick(GAMES);
+    renderWheel();
+    refreshStats();
+    els.verdict.textContent='指针扫动中…点击 / 空格 停止';
+    els.verdict.className='verdict';
+    els.action.textContent='停止判定';
+    els.action.disabled=false;
+    phase=0;
+    if(!rafId) rafId=requestAnimationFrame(sweep);
+  }
+
+  function sweep(t){
+    if(!sweeping) return;
+    phase += 0.045;
+    // triangle-ish oscillation mapped to -90..+90
+    var s=(Math.sin(phase)+1)/2;            // 0..1
+    angle = -90 + s*180;
+    els.needle.setAttribute('transform','rotate('+angle.toFixed(2)+' 100 100)');
+    rafId=requestAnimationFrame(sweep);
+  }
+
+  function onStop(){
+    if(!sweeping || stopped) return;
+    sweeping=false; stopped=true;
+    if(rafId){ cancelAnimationFrame(rafId); rafId=0; }
+    var zoneOk = angle>=0;                  // right half = 达标
+    var punish = run.failStreak>=4;
+    var modType, pool, mod;
+    if(zoneOk && !punish){ modType='buff'; pool=target.buffs; }
+    else { modType='debuff'; pool=target.debuffs; }
+    mod = pick(pool);
+    // update failStreak
+    if(modType==='buff') run.failStreak=0; else run.failStreak++;
+    saveRun();
+    // show verdict
+    var v=els.verdict;
+    if(modType==='buff'){ v.textContent='达标！获得能力：'+mod.t; v.className='verdict ok'; }
+    else { v.textContent='未达标，受到惩罚：'+mod.t; v.className='verdict bad'; }
+    pending={targetId:target.id, modCode:mod.c, modType:modType, chal:target.chal};
+    // change action button to navigate
+    els.action.textContent='进入「'+target.name+'」▶';
+  }
+
+  function navigate(){
+    if(!pending) return;
+    lsSet(K_PEND, pending);
+    var g=GAMES.filter(function(x){return x.id===pending.targetId;})[0];
+    location.href = g.file + '?challenge=' + encodeURIComponent(pending.chal) + '&mod=' + encodeURIComponent(pending.modCode);
+  }
+
+  function handleResult(){
+    var res=lsGet(K_RES);
+    if(!res){ startWheel(); return; }
+    lsDel(K_RES);
+    if(res.result==='win'){
+      var gain = res.gain || 0;
+      run.score += gain;
+      var doneRound = run.round;
+      run.round += 1;
+      if(run.score>run.best) run.best=run.score;
+      saveRun(); refreshStats();
+      els.winGain.textContent='+'+gain;
+      els.winText.textContent='第 '+doneRound+' 关达成，累计 '+run.score+' 分。准备进入下一款随机游戏。';
+      els.ovWin.classList.add('show');
+    } else {
+      if(run.score>run.best) run.best=run.score;
+      saveRun(); refreshStats();
+      els.loseScore.textContent=run.score;
+      els.loseText.textContent='本轮挑战未达标，混合竞速结束。历史最佳 '+run.best+' 分。';
+      els.ovLose.classList.add('show');
+    }
+  }
+
+  // events
+  els.action.addEventListener('click', function(){
+    if(sweeping) onStop();
+    else if(pending) navigate();
+  });
+  document.addEventListener('keydown', function(e){
+    if(e.code==='Space'){ e.preventDefault();
+      if(sweeping) onStop(); else if(pending) navigate(); }
+  });
+  // tap gauge to stop
+  document.getElementById('svg').addEventListener('pointerdown', function(){ if(sweeping) onStop(); });
+
+  els.winNext.addEventListener('click', function(){ els.ovWin.classList.remove('show'); startWheel(); });
+  els.loseRetry.addEventListener('click', function(){
+    els.ovLose.classList.remove('show');
+    run={score:0, round:1, failStreak:0, best:run.best}; saveRun();
+    startWheel();
+  });
+
+  refreshStats();
+  handleResult();
+})();
+</script>
+</body>
+</html>

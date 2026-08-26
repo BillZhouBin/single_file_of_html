@@ -257,6 +257,10 @@
     .flash.dye{ animation:none; }
     .balloon-deco{ animation:none !important; }
   }
+  .chal-banner{position:absolute; top:8px; left:50%; transform:translateX(-50%);
+    background:rgba(202,168,106,.16); border:1px solid rgba(202,168,106,.55); color:var(--gem-1);
+    font-size:12px; font-weight:700; padding:5px 12px; border-radius:999px; white-space:nowrap; z-index:7;}
+  .chal-banner.hidden{display:none;}
 </style>
 </head>
 <body>
@@ -282,6 +286,7 @@
     <div class="flash" id="flash"></div>
     <div class="level-up" id="levelUp"><span>LEVEL UP!</span></div>
     <div class="danger-edge" id="dangerEdge"></div>
+    <div class="chal-banner hidden" id="chalBanner"></div>
 
     <!-- 主菜单 -->
     <div class="overlay" id="menu">
@@ -461,18 +466,41 @@
   let state = STATE.MENU;
   let balloon, fences, gems, bolts, powerups, particles, floatTexts;
   let score, best, spawnTimer, elapsed, inv, invColor, curLevel, fx;
+
+  // ── 混合模式挑战钩子（仅当 URL 带 ?challenge= 时生效，无参数则完全不变）──
+  var CH = (function(){ try{ var q=new URLSearchParams(location.search); var c=q.get('challenge'); return c?{ch:c, mod:q.get('mod')}:null; }catch(e){ return null; } })();
+  var CHAL = { hb_gems:{target:12, label:'收集 12 宝石', kind:'gems'} };
+  var challenge=null, fallMul=1, fenceWidthMul=1, invBonus=0, gemsGot=0, bannerEl=null;
+  function applyMod(){
+    fallMul=1; fenceWidthMul=1; invBonus=0;
+    if(!CH) return;
+    switch(CH.mod){
+      case 'hb_inv': invBonus+=2; break;
+      case 'hb_inv-': invBonus=Math.max(0, invBonus-1); break;
+      case 'hb_slow': fallMul=0.8; break;
+      case 'hb_fast': fallMul=1.25; break;
+      case 'hb_wide': fenceWidthMul=0.8; break;
+      case 'hb_narrow': fenceWidthMul=1.25; break;
+    }
+  }
+  function mmReport(result, gain){
+    try{ localStorage.setItem('mm_result', JSON.stringify({result:result, gain:gain||0})); }catch(e){}
+    location.href='../mixed-mode/mixed-mode.html';
+  }
   best = parseInt(localStorage.getItem('hotAirBalloon.best')||'0',10) || 0;
 
   function reset(){
     balloon = { x:W/2, y:H-64, w:24, h:28, speed:230, vx:0, tilt:0 };
     fences=[]; gems=[]; bolts=[]; powerups=[]; particles=[]; floatTexts=[];
     score=0; spawnTimer=0; elapsed=0; inv=0; invColor=null; curLevel=0;
+    gemsGot=0;
+    if(CH){ applyMod(); challenge = CHAL[CH.ch] || null; } else { challenge=null; }
     fx={ slow:0, magnet:0, double:0 };
   }
 
   // ── 难度（曲线重调：200 分/级，下落更缓，生成 floor 0.72）──
   function level(){ return Math.min(12, Math.floor(score/200)); }
-  function fallSpeed(){ return 60 + level()*12; }
+  function fallSpeed(){ return (60 + level()*12) * fallMul; }
   function rowInterval(){ return Math.max(0.72, 1.4 - level()*0.057); }
   function boltChance(){ return Math.min(0.09, 0.05 + level()*0.0035); }
   function puChance(){ return Math.max(0.05, 0.09 - level()*0.0035); }
@@ -491,7 +519,7 @@
   }
 
   function spawnRow(){
-    const L = 45 + Math.random()*85;
+    const L = (45 + Math.random()*85) * fenceWidthMul;
     const maxX = W - 8 - L;
     const fx0 = 8 + Math.random()*Math.max(1, maxX-8);
     fences.push({ x:fx0, y:-18, w:L, h:16 });
@@ -684,6 +712,8 @@
 
   // ── 更新 ──
   function update(dt){
+    if(challenge && challenge.kind==='gems' && gemsGot>=challenge.target){ mmReport('win', 120); return; }
+    if(challenge && bannerEl){ bannerEl.classList.remove('hidden'); bannerEl.textContent='🎯 收集宝石 '+Math.min(gemsGot,challenge.target)+'/'+challenge.target; }
     elapsed += dt;
     // 气球移动：拖拽绝对跟随（带阻尼）/ 键盘惯性加减速
     if(dragX!==null){
@@ -749,6 +779,7 @@
         g.got=true;
         const add = (g.type===1?20:10) * (fx.double>0?2:1);
         score += add;
+        gemsGot++;
         sfx('gem', g.type);
         burst(g.x, g.y, GEMS[g.type], 8);
         pushFloat(g.x, g.y-6, '+'+add, GEMS[g.type]);
@@ -760,7 +791,7 @@
       const b=bolts[i]; b.y += v*dt;
       if(b.y>H+14){ bolts.splice(i,1); continue; }
       if(aabb(bx,by,balloon.w,balloon.h, b.x-6,b.y-6,12,12)){
-        invColor = b.hue; inv = 4.0;
+        invColor = b.hue; inv = 4.0 + invBonus;
         sfx('bolt');
         burst(b.x, b.y, b.hue, 12);
         pushFloat(b.x, b.y-6, '通电!', b.hue);
@@ -800,7 +831,7 @@
   }
 
   function applyPower(type){
-    if(type==='shield'){ inv = Math.max(inv,5); invColor=null; }
+    if(type==='shield'){ inv = Math.max(inv, 5+invBonus); invColor=null; }
     else if(type==='slow') fx.slow = 5;
     else if(type==='magnet') fx.magnet = 6;
     else if(type==='double') fx.double = 8;
@@ -959,6 +990,7 @@
   const elNewRecord=document.getElementById('newRecord');
   elMenuBest.textContent = best;
   function pad(n){ return String(n).padStart(6,'0'); }
+  bannerEl = document.getElementById('chalBanner');
   function updateHUD(){
     elScoreVal.textContent = pad(score);
     elBestVal.textContent = Math.max(best, score);
@@ -1006,6 +1038,7 @@
   function resume(){ if(state!==STATE.PAUSE) return; state=STATE.PLAY; last=0; pauseEl.classList.add('hidden'); ensureAudio(); sfx('ui'); bgmStart(); }
   function toMenu(){ state=STATE.MENU; pauseEl.classList.add('hidden'); overEl.classList.add('hidden'); menu.classList.remove('hidden'); document.getElementById('levelBar').classList.remove('show'); elMenuBest.textContent = best; floatTexts.length=0; particles.length=0; bgmStop(); sfx('ui'); }
   function gameOver(){
+    if(CH){ mmReport('lose'); return; }
     state=STATE.OVER;
     bgmStop(); sfx('gameover');
     const isNew = score > best;
@@ -1027,7 +1060,8 @@
   document.getElementById('menuBtn2').onclick=toMenu;
   document.getElementById('pauseBtn').onclick=()=>{ state===STATE.PLAY?(ensureAudio(),pause()):state===STATE.PAUSE?(ensureAudio(),resume()):null; };
 
-  reset();
+  if(CH){ start(); if(bannerEl) bannerEl.classList.remove('hidden'); }
+  else { reset(); }
   requestAnimationFrame(loop);
 })();
 </script>

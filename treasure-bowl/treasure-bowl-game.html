@@ -159,6 +159,10 @@
     box-shadow: 0 4px 12px rgba(120,30,30,0.25);
   }
   .mode-label { text-align: center; font-size: 12px; color: #9a6a3a; margin-top: 2px; }
+  .chal-banner{position:absolute; top:8px; left:50%; transform:translateX(-50%);
+    background:rgba(232,184,75,.18); border:1px solid rgba(232,184,75,.6); color:#ffe9a8;
+    font-size:12px; font-weight:700; padding:5px 12px; border-radius:999px; white-space:nowrap; z-index:7;}
+  .chal-banner.hidden{display:none;}
 
   @media (prefers-reduced-motion: reduce) {
     .overlay, .toast, .btn { transition: none !important; }
@@ -286,6 +290,28 @@ let bombChance = 0.13;
 let invulnTimer = 0;
 let mode = 'infinite'; // 'infinite' | 'timed'
 let played = 0;        // 已游玩秒数（无限模式用于难度与显示）
+
+// ── 混合模式挑战钩子（仅当 URL 带 ?challenge= 时生效，无参数则完全不变）──
+var CH = (function(){ try{ var q=new URLSearchParams(location.search); var c=q.get('challenge'); return c?{ch:c, mod:q.get('mod')}:null; }catch(e){ return null; } })();
+var CHAL = { tb_catch:{target:15, label:'接 15 元宝', kind:'catch'} };
+var challenge=null, bowlMul=1, bombMul=1, yuanbaoGot=0, bannerEl=null;
+var bowlHalf = BOWL_HALF;
+function applyMod(){
+  bowlMul=1; bombMul=1;
+  if(!CH) return;
+  switch(CH.mod){
+    case 'tb_wide':    bowlMul=1.35; break;
+    case 'tb_narrow':  bowlMul=0.7; break;
+    case 'tb_lessbomb':bombMul=0.5; break;
+    case 'tb_morebomb':bombMul=1.8; break;
+    case 'tb_life':    lives+=1; break;
+    case 'tb_life-':   lives=Math.max(1, lives-1); break;
+  }
+}
+function mmReport(result, gain){
+  try{ localStorage.setItem('mm_result', JSON.stringify({result:result, gain:gain||0})); }catch(e){}
+  location.href='../mixed-mode/mixed-mode.html';
+}
 let last = performance.now();
 let frameId;
 
@@ -408,6 +434,9 @@ function resetGame() {
   items = []; particles = [];
   spawnAcc = 0; spawnInterval = 760; bombChance = 0.13;
   invulnTimer = 0;
+  yuanbaoGot = 0;
+  if (CH) { applyMod(); challenge = CHAL[CH.ch] || null; } else { challenge = null; }
+  bowlHalf = BOWL_HALF * bowlMul;
   elScore.textContent = '0';
   elTime.textContent = (mode === 'timed') ? DURATION : '0';
   updateLives();
@@ -441,6 +470,7 @@ function resumeGame() {
 }
 
 function gameOver() {
+  if (CH) { mmReport('lose'); return; }
   screen = 'over';
   bgmStop(); sfx('over');
   elPauseBtn.style.display = 'none';
@@ -462,7 +492,7 @@ function goHome() {
 // ---------- Input ----------
 function moveBy(dx) {
   if (screen !== 'play') return;
-  targetX = clamp(targetX + dx, BOWL_HALF, W - BOWL_HALF);
+  targetX = clamp(targetX + dx, bowlHalf, W - bowlHalf);
 }
 
 document.getElementById('btnStart').addEventListener('click', start);
@@ -493,7 +523,7 @@ window.addEventListener('keydown', e => {
 let dragging = false;
 function pointerToLogicalX(clientX) {
   const rect = c.getBoundingClientRect();
-  return clamp((clientX - rect.left) / rect.width * W, BOWL_HALF, W - BOWL_HALF);
+  return clamp((clientX - rect.left) / rect.width * W, bowlHalf, W - bowlHalf);
 }
 gameEl.addEventListener('pointerdown', e => {
   if (screen !== 'play') return;
@@ -524,8 +554,8 @@ function floatText(x, y, txt, color) {
 // ---------- Update ----------
 function collect(it) {
   switch (it.type) {
-    case 'ingot': score += 10; sfx('ingot'); burst(it.x, it.y, '#ffd23f', 10); floatText(it.x, it.y - 20, '+10', '#ffe79a'); break;
-    case 'big':   score += 50; sfx('big');   burst(it.x, it.y, '#ffdf66', 16); floatText(it.x, it.y - 24, '+50', '#fff'); break;
+  case 'ingot': score += 10; sfx('ingot'); burst(it.x, it.y, '#ffd23f', 10); floatText(it.x, it.y - 20, '+10', '#ffe79a'); yuanbaoGot++; break;
+  case 'big':   score += 50; sfx('big');   burst(it.x, it.y, '#ffdf66', 16); floatText(it.x, it.y - 24, '+50', '#fff'); yuanbaoGot++; break;
     case 'coin':  score += 5;  sfx('coin');  burst(it.x, it.y, '#ffd23f', 8);  floatText(it.x, it.y - 16, '+5',  '#ffe79a'); break;
     case 'fu':    lives++; sfx('fu'); burst(it.x, it.y, '#ff5a5a', 12); floatText(it.x, it.y - 20, '+1命', '#ff8a8a'); updateLives(); break;
     case 'bomb':
@@ -551,7 +581,7 @@ function update(dt) {
   const elapsed = (mode === 'timed') ? (DURATION - timeLeft) : played;
   fallSpeed = Math.min(520, 240 + elapsed * 4.5);
   spawnInterval = Math.max(420, 760 - elapsed * 5);
-  bombChance = Math.min(0.30, 0.13 + elapsed * 0.0028);
+  bombChance = Math.min(0.40, (0.13 + elapsed * 0.0028) * bombMul);
 
   // clouds
   clouds.forEach(cl => { cl.x += cl.spd * dt; if (cl.x > W + cl.w) cl.x = -cl.w; });
@@ -568,7 +598,7 @@ function update(dt) {
   items.forEach(it => {
     if (it.collected) return;
     if (it.y > BOWL_Y - 18 && it.y < BOWL_Y + 50) {
-      if (Math.abs(it.x - bowlX) < BOWL_HALF + it.r * 0.3) {
+      if (Math.abs(it.x - bowlX) < bowlHalf + it.r * 0.3) {
         it.collected = true; collect(it);
       }
     } else if (it.y > BOWL_Y + 70) {
@@ -576,6 +606,10 @@ function update(dt) {
     }
   });
   items = items.filter(it => !it.collected && it.y < H + 80);
+
+  // ── 混合模式挑战进度 ──
+  if (challenge && challenge.kind === 'catch' && yuanbaoGot >= challenge.target) { mmReport('win', 120); return; }
+  if (challenge && bannerEl) { bannerEl.classList.remove('hidden'); bannerEl.textContent = '🎯 接元宝 ' + Math.min(yuanbaoGot, challenge.target) + '/' + challenge.target; }
 
   // particles
   particles.forEach(p => {
@@ -652,9 +686,9 @@ function drawBowl(x) {
 
   // shadow
   ctx.fillStyle = 'rgba(0,0,0,0.25)';
-  ctx.beginPath(); ctx.ellipse(0, 56, BOWL_HALF * 0.9, 14, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(0, 56, bowlHalf * 0.9, 14, 0, 0, Math.PI * 2); ctx.fill();
 
-  const topW = BOWL_HALF, botW = BOWL_HALF * 0.66, h = 58;
+  const topW = bowlHalf, botW = bowlHalf * 0.66, h = 58;
   // body
   const grad = ctx.createLinearGradient(0, -20, 0, h);
   grad.addColorStop(0, '#ffe79a');
@@ -787,8 +821,19 @@ function loop(now) {
   frameId = requestAnimationFrame(loop);
 }
 
-// Initial draw for menu background
-draw();
+// ---------- Challenge banner (created once, hidden by default) ----------
+bannerEl = document.createElement('div');
+bannerEl.className = 'chal-banner hidden';
+gameEl.appendChild(bannerEl);
+
+// Initial state
+if (CH) {
+  start();
+  if (bannerEl) bannerEl.classList.remove('hidden');
+} else {
+  resetGame();
+  draw();
+}
 </script>
 </body>
 </html>

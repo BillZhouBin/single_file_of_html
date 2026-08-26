@@ -86,6 +86,11 @@
     transition:opacity .12s ease; pointer-events:none;
   }
   .hud-combo.show{opacity:1;}
+  .chal-banner{position:absolute; top:8px; left:50%; transform:translateX(-50%);
+    background:rgba(255,216,107,.14); border:1px solid rgba(255,216,107,.5); color:var(--gold);
+    font-size:12px; font-weight:700; padding:5px 12px; border-radius:999px; white-space:nowrap;
+    z-index:6; pointer-events:none;}
+  .chal-banner.hidden{display:none;}
 
   /* ── 覆盖层（菜单/暂停/结束）── */
   .overlay{
@@ -143,6 +148,7 @@
       <div class="hud-right" id="lives"></div>
       <div class="hud-combo" id="combo"></div>
     </div>
+    <div class="chal-banner hidden" id="chalBanner"></div>
     <button class="pause-btn" id="pauseBtn">II</button>
 
     <!-- 主菜单 -->
@@ -195,6 +201,7 @@
     wave: document.getElementById('wave'),
     lives: document.getElementById('lives'),
     combo: document.getElementById('combo'),
+    chalBanner: document.getElementById('chalBanner'),
     pauseBtn: document.getElementById('pauseBtn'),
     menu: document.getElementById('menu'),
     pause: document.getElementById('pause'),
@@ -475,6 +482,27 @@
   let pFrameIdx, pFrameTimer, eFrameIdx, eFrameTimer, bFrameIdx, bFrameTimer;
   best = parseInt(localStorage.getItem('planeWar.best') || '0', 10);
 
+  // ── 混合模式挑战钩子（仅当 URL 带 ?challenge= 时生效，无参数则完全不变）──
+  var CH = (function(){ try{ var q=new URLSearchParams(location.search); var c=q.get('challenge'); return c?{ch:c, mod:q.get('mod')}:null; }catch(e){ return null; } })();
+  var CHAL = { pw_survive:{target:60, label:'活过 60 秒', kind:'survive'} };
+  var challenge=null, fireMul=1, enemyMul=1;
+  function applyMod(){
+    fireMul=1; enemyMul=1;
+    if(!CH) return;
+    switch(CH.mod){
+      case 'pw_life': lives+=1; break;
+      case 'pw_life-': lives=Math.max(1, lives-1); break;
+      case 'pw_fire': fireMul=0.7; break;
+      case 'pw_weak': fireMul=1.43; break;
+      case 'pw_slow': enemyMul=0.8; break;
+      case 'pw_fast': enemyMul=1.25; break;
+    }
+  }
+  function mmReport(result, gain){
+    try{ localStorage.setItem('mm_result', JSON.stringify({result:result, gain:gain||0})); }catch(e){}
+    location.href='../mixed-mode/mixed-mode.html';
+  }
+
   // 输入
   const keys = {};
   let pointerActive = false, ptrX = W/2, ptrY = H-60;
@@ -499,6 +527,7 @@
     initStars();
     score = 0; lives = 3; wave = 1; elapsed = 0;
     spawnTimer = 0; fireTimer = 0; shake = 0; combo = 0; comboTimer = 0;
+    if(CH){ applyMod(); challenge = CHAL[CH.ch] || null; } else { challenge = null; }
     bossStage = 1; bossNextAt = 45; flameIdx = 0; flameTimer = 0;
     pFrameIdx = 0; pFrameTimer = 0; eFrameIdx = 0; eFrameTimer = 0; bFrameIdx = 0; bFrameTimer = 0;
     updateHUD();
@@ -536,7 +565,7 @@
     const hp = ti===2 ? 4 : ti===1 ? 2 : 1;        // 紫4血 / 绿2血 / 红1血（让精英能扛几发、真正开火）
     enemies.push({
       x: 8 + Math.random()*(W-16-w), y: -h, w, h,
-      vy: base, vx: (Math.random()-0.5)*(ti*8),
+      vy: base*enemyMul, vx: (Math.random()-0.5)*(ti*8),
       type:ti, body:t.body, dark:t.dark, score:t.score, hp, hitFlash:0,
       shootCD: 0.4 + Math.random()*0.8, canShoot: ti>0 && elapsed>12,  // 进场即接近开火
     });
@@ -789,7 +818,12 @@
   // ── 更新 ──
   function update(dt){
     elapsed += dt;
+    if(challenge && challenge.kind==='survive' && elapsed>=challenge.target){ mmReport('win', 120); return; }
     wave = 1 + Math.floor(elapsed/20);
+    if(challenge && el.chalBanner){
+      el.chalBanner.classList.remove('hidden');
+      el.chalBanner.textContent = '🎯 '+challenge.label+'  '+Math.min(Math.floor(elapsed),challenge.target)+'/'+challenge.target;
+    }
     // 引擎尾焰帧动画（4 帧循环）
     flameTimer -= dt;
     if(flameTimer<=0){ flameTimer = 0.07; flameIdx = (flameIdx+1) % FLAME_FRAMES.length; }
@@ -828,7 +862,7 @@
     // 自动开火
     fireTimer -= dt;
     if(fireTimer<=0){
-      fireTimer = 0.16;
+      fireTimer = 0.16*fireMul;
       // 子弹速度随生存时间增长（斜率 1.9 > 敌机下落 1.6），后期始终快过最快的敌机
       const bSpeed = 260 + elapsed*1.9;
       bullets.push({x:player.x-6, y:player.y-player.h/2, vy:-bSpeed});
@@ -954,6 +988,7 @@
   }
 
   function gameOver(){
+    if(CH){ mmReport('lose'); return; }
     if(score>best){ best=score; localStorage.setItem('planeWar.best', String(best)); }
     el.finalScore.textContent = score;
     el.bestScore.textContent = best;
@@ -1090,7 +1125,8 @@
     requestAnimationFrame(loop);
   }
 
-  setState('menu');
+  if(CH){ startGame(); if(el.chalBanner) el.chalBanner.classList.remove('hidden'); }
+  else { setState('menu'); }
   initStars();
   requestAnimationFrame(loop);
 })();
