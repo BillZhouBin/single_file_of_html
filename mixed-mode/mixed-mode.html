@@ -104,16 +104,14 @@
     </div>
   </div>
   <h1>无限竞速混合</h1>
-  <div class="sub">随机进入一款游戏 · 弧形指针判定加成 · 无限闯关直到失败</div>
+  <div class="sub">固定顺序 1→2→3→4 · 指针停中段绿区=达标（进游戏加 buff）· 未命中跳下一款 · 全未命中随机一款带 debuff</div>
 
   <div class="wheel" id="wheel"></div>
 
-  <div class="warn" id="warn">⚠ 惩罚回合：已连续未达标，本轮随机强制一款游戏并必定带惩罚</div>
-
   <div class="gauge">
     <svg viewBox="0 0 200 120" id="svg">
-      <path d="M 10 100 A 90 90 0 0 1 181.1 60.9" fill="none" stroke="var(--bad)" stroke-width="14" stroke-linecap="round" opacity=".9"/>
-      <path d="M 181.1 60.9 A 90 90 0 0 1 190 100" fill="none" stroke="var(--ok)" stroke-width="14" stroke-linecap="round" opacity=".95"/>
+      <path d="M 10 100 A 90 90 0 0 1 190 100" fill="none" stroke="var(--bad)" stroke-width="14" stroke-linecap="round" opacity=".9"/>
+      <path id="greenArc" d="M 80 12.3 A 90 90 0 0 1 120 12.3" fill="none" stroke="var(--ok)" stroke-width="14" stroke-linecap="round" opacity=".95"/>
       <line x1="100" y1="100" x2="100" y2="14" stroke="rgba(255,255,255,.25)" stroke-width="1"/>
       <g id="needle">
         <line x1="100" y1="100" x2="100" y2="20" stroke="var(--gold)" stroke-width="4" stroke-linecap="round"/>
@@ -121,12 +119,12 @@
       </g>
       <circle cx="100" cy="100" r="8" fill="#fff"/>
     </svg>
-    <div class="glabel"><span class="l">◀ 未达标</span><span class="r">达标 ▶</span></div>
+    <div class="glabel"><span class="l">🔴 未达标</span><span class="r">🟢 中段绿区=达标</span></div>
     <div class="verdict" id="verdict">指针扫动中…点击 / 空格 停止</div>
   </div>
 
   <button class="btn full" id="actionBtn">停止判定</button>
-  <div class="hint">玩法：每关随机高亮一款游戏 → 指针扫动时停止 → 停在「达标」获得能力加成，停在「未达标」获得惩罚 → 进入该游戏完成目标即过关，失败则本轮结束。</div>
+  <div class="hint">玩法：四款按 1→2→3→4 固定顺序判定 → 指针停在中段随机绿区=达标（进入并加 buff），未命中自动跳下一款 → 若四款全未命中，随机挑一款并施加 debuff 进入 → 完成目标即过关，失败则本轮结束。</div>
 </div>
 
 <!-- success overlay -->
@@ -179,7 +177,7 @@
   function lsSet(k,v){ try{localStorage.setItem(k,JSON.stringify(v));}catch(e){} }
   function lsDel(k){ try{localStorage.removeItem(k);}catch(e){} }
 
-  var run = lsGet(K_RUN) || {score:0, round:1, failStreak:0, best:0};
+  var run = lsGet(K_RUN) || {score:0, round:1, best:0};
   run.best = run.best || 0;
 
   var els = {
@@ -187,8 +185,8 @@
     runScore:document.getElementById('runScore'),
     runRound:document.getElementById('runRound'),
     runBest:document.getElementById('runBest'),
-    warn:document.getElementById('warn'),
     needle:document.getElementById('needle'),
+    greenArc:document.getElementById('greenArc'),
     verdict:document.getElementById('verdict'),
     action:document.getElementById('actionBtn'),
     ovWin:document.getElementById('ovWin'),
@@ -201,8 +199,8 @@
     loseRetry:document.getElementById('loseRetry')
   };
 
-  var target=null, pending=null, sweeping=false, stopped=false, angle=0, phase=0, rafId=0;
-  var OK_FROM = 90 - 180/7;                 // 达标区起点：右端约 1/7 圆弧（≈25.7°）
+  var target=null, pending=null, sweeping=false, stopped=false, awaitingNext=false, angle=0, phase=0, rafId=0;
+  var seqIndex=0, greenStart=0, greenWidth=180/7;   // 1/7 圆弧；绿区每关在中段随机定位
 
   function saveRun(){ lsSet(K_RUN, run); }
   function refreshStats(){
@@ -225,16 +223,28 @@
 
   function pick(arr){ return arr[Math.floor(Math.random()*arr.length)]; }
 
+  // 圆弧上的点：needle 角 aDeg(-90..+90) → 坐标
+  function arcPoint(aDeg){
+    var r=aDeg*Math.PI/180;
+    return { x:100 + 90*Math.sin(r), y:100 - 90*Math.cos(r) };
+  }
+  // 每关把绿区(达标)随机放到中段
+  function setGreenZone(){
+    greenWidth = 180/7;                       // ≈25.7° = 1/7 圆弧
+    var center = (Math.random()*2 - 1) * 45;  // 中段 -45..+45
+    greenStart = center - greenWidth/2;
+    var p1=arcPoint(greenStart), p2=arcPoint(greenStart + greenWidth);
+    els.greenArc.setAttribute('d',
+      'M '+p1.x.toFixed(1)+' '+p1.y.toFixed(1)+' A 90 90 0 0 1 '+p2.x.toFixed(1)+' '+p2.y.toFixed(1));
+  }
+
   function startWheel(){
-    stopped=false; sweeping=true;
-    pending=null;
-    // punishment round?
-    var punish = run.failStreak>=4;
-    els.warn.classList.toggle('show', punish);
-    target = pick(GAMES);
+    stopped=false; sweeping=true; awaitingNext=false; pending=null;
+    target = GAMES[seqIndex];
+    setGreenZone();
     renderWheel();
     refreshStats();
-    els.verdict.textContent='指针扫动中…点击 / 空格 停止';
+    els.verdict.textContent='指针扫动中…点击 / 空格 停止（第 '+(seqIndex+1)+' 款：'+target.name+'）';
     els.verdict.className='verdict';
     els.action.textContent='停止判定';
     els.action.disabled=false;
@@ -244,7 +254,7 @@
 
   function sweep(t){
     if(!sweeping) return;
-    phase += 0.045;
+    phase += 0.085;
     // triangle-ish oscillation mapped to -90..+90
     var s=(Math.sin(phase)+1)/2;            // 0..1
     angle = -90 + s*180;
@@ -256,22 +266,30 @@
     if(!sweeping || stopped) return;
     sweeping=false; stopped=true;
     if(rafId){ cancelAnimationFrame(rafId); rafId=0; }
-    var zoneOk = angle>=OK_FROM;            // 仅右端约 1/7 小弧 = 达标
-    var punish = run.failStreak>=4;
-    var modType, pool, mod;
-    if(zoneOk && !punish){ modType='buff'; pool=target.buffs; }
-    else { modType='debuff'; pool=target.debuffs; }
-    mod = pick(pool);
-    // update failStreak
-    if(modType==='buff') run.failStreak=0; else run.failStreak++;
-    saveRun();
-    // show verdict
+    var zoneOk = angle>=greenStart && angle<=greenStart+greenWidth;  // 中段随机绿区=达标
     var v=els.verdict;
-    if(modType==='buff'){ v.textContent='达标！获得能力：'+mod.t; v.className='verdict ok'; }
-    else { v.textContent='未达标，受到惩罚：'+mod.t; v.className='verdict bad'; }
-    pending={targetId:target.id, modCode:mod.c, modType:modType, chal:target.chal};
-    // change action button to navigate
-    els.action.textContent='进入「'+target.name+'」▶';
+    if(zoneOk){
+      var bmod=pick(target.buffs);
+      v.textContent='达标！获得能力：'+bmod.t;
+      v.className='verdict ok';
+      pending={targetId:target.id, modCode:bmod.c, modType:'buff', chal:target.chal};
+      els.action.textContent='进入「'+target.name+'」▶';
+    } else if(seqIndex < GAMES.length-1){
+      // 未命中 → 按固定顺序跳下一款再判定
+      seqIndex++;
+      awaitingNext=true;
+      v.textContent='未命中，跳转下一款：'+GAMES[seqIndex].name+' ▶';
+      v.className='verdict bad';
+      els.action.textContent='继续判定 ▶';
+      els.action.disabled=false;
+    } else {
+      // 四款全未命中 → 随机一款 + 随机 debuff
+      var g=pick(GAMES), dmod=pick(g.debuffs);
+      v.textContent='四款全未命中！随机惩罚：'+g.name+' · '+dmod.t;
+      v.className='verdict bad';
+      pending={targetId:g.id, modCode:dmod.c, modType:'debuff', chal:g.chal};
+      els.action.textContent='进入「'+g.name+'」(惩罚) ▶';
+    }
   }
 
   function navigate(){
@@ -293,7 +311,7 @@
       if(run.score>run.best) run.best=run.score;
       saveRun(); refreshStats();
       els.winGain.textContent='+'+gain;
-      els.winText.textContent='第 '+doneRound+' 关达成，累计 '+run.score+' 分。准备进入下一款随机游戏。';
+      els.winText.textContent='第 '+doneRound+' 关达成，累计 '+run.score+' 分。下关重置回第 1 款游戏。';
       els.ovWin.classList.add('show');
     } else {
       if(run.score>run.best) run.best=run.score;
@@ -307,20 +325,23 @@
   // events
   els.action.addEventListener('click', function(){
     if(sweeping) onStop();
+    else if(awaitingNext){ awaitingNext=false; startWheel(); }
     else if(pending) navigate();
   });
   document.addEventListener('keydown', function(e){
     if(e.code==='Space'){ e.preventDefault();
-      if(sweeping) onStop(); else if(pending) navigate(); }
+      if(sweeping) onStop();
+      else if(awaitingNext){ awaitingNext=false; startWheel(); }
+      else if(pending) navigate(); }
   });
   // tap gauge to stop
   document.getElementById('svg').addEventListener('pointerdown', function(){ if(sweeping) onStop(); });
 
-  els.winNext.addEventListener('click', function(){ els.ovWin.classList.remove('show'); startWheel(); });
+  els.winNext.addEventListener('click', function(){ els.ovWin.classList.remove('show'); seqIndex=0; startWheel(); });
   els.loseRetry.addEventListener('click', function(){
     els.ovLose.classList.remove('show');
-    run={score:0, round:1, failStreak:0, best:run.best}; saveRun();
-    startWheel();
+    run={score:0, round:1, best:run.best}; saveRun();
+    seqIndex=0; startWheel();
   });
 
   refreshStats();
