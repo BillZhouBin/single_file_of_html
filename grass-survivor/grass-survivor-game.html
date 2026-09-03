@@ -121,8 +121,9 @@
   }
   .hint-key {
     position: absolute; bottom: 12px; left: 12px;
-    font-size: 11px; color: rgba(255,233,168,0.5);
+    font-size: 11px; color: rgba(255,233,168,0.8);
     z-index: 8; pointer-events: none; letter-spacing: 1px;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.6);
   }
 
   /* ---------- Overlays ---------- */
@@ -184,7 +185,7 @@
     transition: all .15s;
   }
   .mode-btn.active { background: #a01818; color: #fff; border-color: transparent; }
-  .mode-label { text-align: center; font-size: 11px; color: #9a6a3a; margin-top: 2px; }
+  .mode-label { text-align: center; font-size: 11px; color: #8a4b2b; margin-top: 2px; }
 
   /* 升级三选一 */
   .lv-grid { display: flex; flex-direction: column; gap: 10px; width: 100%; max-width: 340px; }
@@ -1484,7 +1485,8 @@ window.addEventListener('keydown', function(e){
   if(k === ' ' || k === 'arrowup' || k === 'arrowdown' || k === 'arrowleft' || k === 'arrowright') e.preventDefault();
   if(k === 'p'){ if(state==='play'||state==='pause') togglePause(); }
   if(k === 'm'){ muted = !muted; }
-  if(k === 'enter'){
+  // Enter / 空格 快捷开始（与合集其余游戏保持一致）
+  if(k === 'enter' || k === ' '){
     if(state === 'menu') startGame();
     else if(state === 'over') startGame();
   }
