@@ -2,9 +2,13 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0d1120">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>一骑当千 · 像素割草幸存者</title>
-<meta name="description" content="竖屏像素割草 roguelike：操控武将单骑冲阵，武器自动攻击，击杀掉经验，升级三选一，活到最后。支持无限 / 限时（90 秒）双模式。">
+<meta name="description" content="横屏像素割草 roguelike：操控武将单骑冲阵，武器自动攻击，击杀掉经验，升级三选一，活到最后。手机横屏 · 浮动摇杆，支持无限 / 限时（90 秒）双模式。">
 <style>
   :root {
     --grass-1:  #2d5a27;
@@ -23,7 +27,12 @@
   }
 
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-  html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; }
+  html, body {
+    margin: 0; padding: 0;
+    width: 100%; height: 100%;
+    overflow: hidden;
+    overscroll-behavior: none;
+  }
 
   body {
     background: #0d1120;
@@ -32,68 +41,88 @@
     touch-action: none; user-select: none; -webkit-user-select: none;
   }
 
+  /* 横屏优先：容器铺满可用区域（手机横屏 = 满屏无黑边），
+     桌面端封顶 1400×780 居中，避免窗口过大导致像素被拉花。
+     逻辑分辨率 W 由 JS 按容器真实长宽比动态推导（见 resize()）。 */
   #game {
     position: relative;
-    width: min(100vw, 56.25vh);
-    height: min(177.78vw, 100vh);
+    width: 100vw;   width: 100dvw;   max-width: 1400px;
+    height: 100vh;  height: 100dvh;  max-height: 780px;
     background: var(--grass-1);
     overflow: hidden;
+    touch-action: none;
     box-shadow: 0 20px 60px rgba(0,0,0,0.5);
   }
 
   canvas { display: block; width: 100%; height: 100%; }
 
-  /* ---------- HUD ---------- */
+  /* ---------- HUD（横屏：收进左上角，中间战场完全留白） ---------- */
   .hud {
-    position: absolute; top: 0; left: 0; right: 0;
-    padding: 10px 12px;
+    position: absolute; top: 0; left: 0;
+    padding: max(8px, env(safe-area-inset-top)) 12px 8px max(14px, env(safe-area-inset-left));
+    display: flex; flex-direction: row; align-items: flex-start; gap: 10px;
     pointer-events: none; z-index: 10;
   }
+  .hud-bars { display: flex; flex-direction: column; gap: 5px; }
   .bar {
-    height: 12px; border-radius: 6px;
+    width: min(260px, 28vw);
+    height: 11px; border-radius: 6px;
     background: rgba(10,14,26,0.72);
     border: 2px solid rgba(255,210,63,0.55);
-    overflow: hidden; margin-bottom: 5px;
+    overflow: hidden;
   }
   .bar-fill { height: 100%; width: 0%; transition: width .12s linear; }
   #xpFill { background: linear-gradient(90deg, #ffd23f, #ffe9a8); }
   #hpFill { background: linear-gradient(90deg, #e23b3b, #ff8a7a); }
-  #bossBar { display: none; border-color: rgba(226,59,59,0.8); margin-top: 2px; }
+  #bossBar { display: none; border-color: rgba(226,59,59,0.8); }
   #bossFill { background: linear-gradient(90deg, #b8352f, #e05a4a); }
 
-  .hud-row { display: flex; gap: 6px; align-items: center; }
+  .hud-row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
   .chip {
     background: rgba(10,14,26,0.72);
     border: 2px solid rgba(255,210,63,0.45);
     border-radius: 999px;
-    padding: 3px 10px;
-    font-size: 13px; font-weight: 700;
+    padding: 4px 11px;
+    font-size: 14px; font-weight: 700;
     color: #ffe9a8; letter-spacing: 1px;
+    white-space: nowrap;
   }
   .chip b { color: #fff; }
   .chip.warn { border-color: rgba(226,59,59,0.85); color: #ffb3ab; }
 
-  .pause-btn {
-    position: absolute; top: 10px; right: 12px;
-    width: 40px; height: 40px; border-radius: 8px;
-    background: rgba(10,14,26,0.72); border: 2px solid rgba(255,210,63,0.55);
-    color: #ffe9a8; font-size: 16px;
-    display: none; align-items: center; justify-content: center;
-    pointer-events: auto; cursor: pointer; z-index: 11;
+  /* 右上角按钮组（暂停 / 全屏），均避开刘海与安全区 */
+  .ctrl {
+    position: absolute; top: max(8px, env(safe-area-inset-top));
+    display: flex; gap: 8px; z-index: 11;
+    right: max(14px, env(safe-area-inset-right));
   }
-  .pause-btn.show { display: flex; }
+  .ctrl-btn {
+    width: 42px; height: 42px; border-radius: 8px;
+    background: rgba(10,14,26,0.72); border: 2px solid rgba(255,210,63,0.55);
+    color: #ffe9a8; font-size: 17px;
+    display: none; align-items: center; justify-content: center;
+    pointer-events: auto; cursor: pointer;
+    font-family: inherit; padding: 0;
+  }
+  .ctrl-btn.show { display: flex; }
+  .ctrl-btn:active { transform: translateY(2px); }
 
-  /* ---------- 武器栏 ---------- */
+  /* ---------- 武器栏（横屏：右下角，与左下摇杆对角呼应） ---------- */
   .wbar {
-    position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%);
-    display: flex; gap: 6px; z-index: 9; pointer-events: none;
+    position: absolute;
+    bottom: max(12px, env(safe-area-inset-bottom));
+    right: max(14px, env(safe-area-inset-right));
+    display: flex; gap: 6px; flex-wrap: wrap;
+    justify-content: flex-end;
+    max-width: 46%;
+    z-index: 9; pointer-events: none;
   }
   .wslot {
-    width: 34px; height: 34px; border-radius: 8px;
+    width: 38px; height: 38px; border-radius: 8px;
     background: rgba(10,14,26,0.75);
     border: 2px solid rgba(255,210,63,0.5);
     display: flex; align-items: center; justify-content: center;
-    font-size: 16px; font-weight: 700; color: #fff;
+    font-size: 18px; font-weight: 700; color: #fff;
     position: relative;
   }
   .wslot .lv {
@@ -103,28 +132,32 @@
     border-radius: 4px; padding: 0 3px; line-height: 13px;
   }
 
-  /* ---------- 虚拟摇杆 ---------- */
+  /* ---------- 浮动虚拟摇杆（横屏：落指处生成，左手拇指在哪都能推） ---------- */
+  /* 摇杆与提示纯视觉，不拦截触摸 —— 保证「点哪都算落指」 */
   .stick {
-    position: absolute; left: 26px; bottom: 62px;
-    width: 104px; height: 104px; border-radius: 50%;
+    position: absolute; left: 0; top: 0;
+    width: 124px; height: 124px; margin: -62px 0 0 -62px;
+    border-radius: 50%;
     background: rgba(10,14,26,0.34);
     border: 2px solid rgba(255,210,63,0.34);
-    z-index: 8; display: none;
+    z-index: 8; display: none; pointer-events: none;
   }
   .stick.show { display: block; }
   .stick-knob {
     position: absolute; left: 50%; top: 50%;
-    width: 46px; height: 46px; margin: -23px 0 0 -23px;
+    width: 54px; height: 54px; margin: -27px 0 0 -27px;
     border-radius: 50%;
     background: rgba(255,210,63,0.72);
     border: 2px solid rgba(255,233,168,0.9);
   }
   .hint-key {
-    position: absolute; bottom: 12px; left: 12px;
+    position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%);
     font-size: 11px; color: rgba(255,233,168,0.8);
     z-index: 8; pointer-events: none; letter-spacing: 1px;
     text-shadow: 0 1px 2px rgba(0,0,0,0.6);
+    white-space: nowrap; opacity: 0; transition: opacity .3s;
   }
+  .hint-key.show { opacity: 1; }
 
   /* ---------- Overlays ---------- */
   .overlay {
@@ -151,7 +184,14 @@
     max-width: 340px; width: 100%;
     color: var(--ink);
   }
-  .tips { text-align: left; margin-bottom: 16px; }
+
+  /* 菜单卡：横屏下拆成「玩法说明 | 模式选择」两栏，压低高度 */
+  .card--menu {
+    max-width: 620px;
+    display: grid; grid-template-columns: 1fr 1fr;
+    gap: 16px 24px; align-items: center;
+  }
+  .tips { text-align: left; margin-bottom: 0; }
   .tips h3 { margin: 0 0 10px; font-size: 15px; color: var(--ink); letter-spacing: 1px; }
   .tip-row {
     display: flex; align-items: center; gap: 10px;
@@ -187,9 +227,13 @@
   .mode-btn.active { background: #a01818; color: #fff; border-color: transparent; }
   .mode-label { text-align: center; font-size: 11px; color: #8a4b2b; margin-top: 2px; }
 
-  /* 升级三选一 */
-  .lv-grid { display: flex; flex-direction: column; gap: 10px; width: 100%; max-width: 340px; }
+  /* 升级三选一：横屏改为横排三列（竖屏会顶出屏幕，横屏高度最紧） */
+  .lv-grid {
+    display: flex; justify-content: center; gap: 10px;
+    width: 100%; max-width: 720px;
+  }
   .lv-card {
+    flex: 1 1 0; min-width: 0; max-width: 240px;
     display: flex; align-items: center; gap: 12px;
     background: var(--panel);
     border: 3px solid var(--gold-deep); border-radius: 14px;
@@ -227,8 +271,55 @@
     padding: 3px 12px; border-radius: 999px; font-size: 12px; font-weight: 700; margin-bottom: 8px;
   }
 
+  /* ---------- 竖屏引导（仅触摸设备：手机/平板竖握时提示旋转） ---------- */
+  #rotate {
+    position: fixed; inset: 0; z-index: 100;
+    display: none; flex-direction: column;
+    align-items: center; justify-content: center; gap: 16px;
+    background: #0d1120; color: #ffe9a8;
+    font-size: 17px; font-weight: 700; letter-spacing: 1px;
+    text-align: center; padding: 28px;
+  }
+  #rotate .rot-ico { font-size: 62px; line-height: 1; animation: rot 2.4s ease-in-out infinite; }
+  #rotate .rot-sub { font-size: 13px; color: #9aa3b2; font-weight: 400; letter-spacing: 0; }
+  @keyframes rot { 0%, 40% { transform: rotate(0deg); } 60%, 100% { transform: rotate(-90deg); } }
+  @media (orientation: portrait) and (pointer: coarse) {
+    #rotate { display: flex; }
+  }
+
+  /* ---------- 响应式：手机横屏（高度很矮）压缩纵向占用 ---------- */
+  @media (max-height: 460px) {
+    .overlay { padding: 12px 16px; }
+    .ov-title { font-size: clamp(20px, 4.4vh, 30px); margin-bottom: 2px; }
+    .ov-sub { font-size: 12px; margin-bottom: 10px; }
+    .card { padding: 12px 16px; border-radius: 14px; }
+    .card--menu { gap: 10px 18px; max-width: 560px; }
+    .tips h3 { font-size: 13px; margin-bottom: 6px; }
+    .tip-row { font-size: 12px; margin: 4px 0; gap: 8px; }
+    .tip-icon { width: 20px; height: 20px; font-size: 11px; }
+    .btn { padding: 10px; font-size: 15px; }
+    .mode-btn { padding: 6px 0; font-size: 13px; }
+    .lv-card { padding: 8px 10px; gap: 9px; }
+    .lv-icon { width: 34px; height: 34px; font-size: 17px; border-radius: 8px; }
+    .lv-name { font-size: 14px; }
+    .lv-desc { font-size: 11px; }
+    .res-score { font-size: 32px; margin: 2px 0; }
+    .res-row { font-size: 13px; padding: 4px 2px; }
+    .bar { height: 9px; }
+    .chip { font-size: 12px; padding: 3px 9px; }
+    .wslot { width: 32px; height: 32px; font-size: 15px; }
+    .stick { width: 104px; height: 104px; margin: -52px 0 0 -52px; }
+    .stick-knob { width: 46px; height: 46px; margin: -23px 0 0 -23px; }
+  }
+
+  /* 窄屏（小手机）菜单改回单栏 */
+  @media (max-width: 560px) {
+    .card--menu { grid-template-columns: 1fr; max-width: 340px; }
+  }
+
   @media (prefers-reduced-motion: reduce) {
-    .overlay, .lv-card, .btn { transition: none !important; }
+    .overlay, .lv-card, .btn, .hint-key { transition: none !important; }
+    #rotate .rot-ico { animation: none; }
   }
 </style>
 </head>
@@ -237,27 +328,33 @@
 <div id="game">
   <canvas id="c"></canvas>
 
+  <!-- HUD：左侧「血条列 + 数据芯片列」，右侧战场完全留白 -->
   <div class="hud">
-    <div class="bar"><div class="bar-fill" id="xpFill"></div></div>
-    <div class="bar"><div class="bar-fill" id="hpFill"></div></div>
-    <div class="bar" id="bossBar"><div class="bar-fill" id="bossFill"></div></div>
+    <div class="hud-bars">
+      <div class="bar"><div class="bar-fill" id="xpFill"></div></div>
+      <div class="bar"><div class="bar-fill" id="hpFill"></div></div>
+      <div class="bar" id="bossBar"><div class="bar-fill" id="bossFill"></div></div>
+    </div>
     <div class="hud-row">
       <span class="chip">Lv <b id="lvNum">1</b></span>
       <span class="chip" id="timeChip">0:00</span>
       <span class="chip">斩 <b id="killNum">0</b></span>
     </div>
   </div>
-  <div class="pause-btn" id="btnPause">⏸</div>
+  <div class="ctrl">
+    <button class="ctrl-btn" id="btnFs" aria-label="全屏" title="全屏">⛶</button>
+    <button class="ctrl-btn" id="btnPause" aria-label="暂停" title="暂停">⏸</button>
+  </div>
 
   <div class="wbar" id="wbar"></div>
   <div class="stick" id="stick"><div class="stick-knob" id="knob"></div></div>
-  <div class="hint-key">WASD/方向键 移动 · P 暂停 · M 静音</div>
+  <div class="hint-key" id="hintKey">WASD/方向键 移动 · P 暂停 · M 静音</div>
 
   <!-- 菜单 -->
   <div class="overlay" id="menu">
     <div class="ov-title">一骑当千</div>
     <div class="ov-sub">像素割草 · 幸存者 ROGUELIKE</div>
-    <div class="card">
+    <div class="card card--menu">
       <div class="tips">
         <h3>玩法说明</h3>
         <div class="tip-row"><div class="tip-icon" style="background:#9be7ff;color:#0a3a52">刀</div>武器自动攻击，你只需走位</div>
@@ -265,12 +362,14 @@
         <div class="tip-row"><div class="tip-icon" style="background:#e23b3b;color:#fff">选</div>每次升级三选一，构筑你的流派</div>
         <div class="tip-row"><div class="tip-icon" style="background:#5a6270;color:#fff">敌</div>每 60 秒敌将来袭，血量归零即败</div>
       </div>
-      <div class="mode-toggle">
-        <button class="mode-btn active" id="btnInf">无限</button>
-        <button class="mode-btn" id="btnTimed">限时 90s</button>
+      <div>
+        <div class="mode-toggle">
+          <button class="mode-btn active" id="btnInf">无限</button>
+          <button class="mode-btn" id="btnTimed">限时 90s</button>
+        </div>
+        <div class="mode-label" id="modeLabel">无限模式 · 活到最后一刻</div>
+        <button class="btn btn-primary" id="btnStart" style="margin-top:12px">出阵 ▶</button>
       </div>
-      <div class="mode-label" id="modeLabel">无限模式 · 活到最后一刻</div>
-      <button class="btn btn-primary" id="btnStart" style="margin-top:12px">出阵 ▶</button>
     </div>
   </div>
 
@@ -306,13 +405,24 @@
 </div>
 
 <script src="../shared.js"></script>
+<!-- 竖屏引导：仅在触摸设备竖握时显示 -->
+<div id="rotate">
+  <div class="rot-ico">📱</div>
+  <div>请横屏游玩</div>
+  <div class="rot-sub">把手机转过来，战场才铺得开</div>
+</div>
+
 <script>
 (function(){
 'use strict';
 
 // ================= 常量与调色板 =================
-var W = 540, H = 960;              // 逻辑分辨率（9:16 竖屏）
-var WORLD = 2600;                  // 战场边长
+// 横屏：逻辑高度固定 540，逻辑宽度由容器长宽比动态推导（见 resize()）。
+// 参考值：16:9 → 960×540；手机 19.5:9 → 约 1168×540；平板 4:3 → 720×540。
+var BASE_H = 540;
+var W = 960, H = BASE_H;
+var W_MIN = 720, W_MAX = 1400;     // 逻辑宽度夹取范围，防极端窗口比例
+var WORLD_W = 3400, WORLD_H = 2400;// 战场为横长方形，匹配横屏视野比例
 var CELL = 64;                     // 空间网格尺寸（碰撞加速）
 
 var COL = {
@@ -464,6 +574,7 @@ var el = {
   bossBar:document.getElementById('bossBar'), bossFill:document.getElementById('bossFill'),
   lvNum:document.getElementById('lvNum'), killNum:document.getElementById('killNum'),
   timeChip:document.getElementById('timeChip'), btnPause:document.getElementById('btnPause'),
+  btnFs:document.getElementById('btnFs'), hintKey:document.getElementById('hintKey'),
   wbar:document.getElementById('wbar'), stick:document.getElementById('stick'), knob:document.getElementById('knob'),
   menu:document.getElementById('menu'), levelup:document.getElementById('levelup'),
   pauseOv:document.getElementById('pauseOv'), overOv:document.getElementById('overOv'),
@@ -478,16 +589,29 @@ var el = {
   resBest:document.getElementById('resBest')
 };
 
-// ================= 画布自适应 =================
-var scale = 1;
+// ================= 画布自适应（横屏 · 动态逻辑宽度） =================
+var scale = 1, offX = 0, offY = 0;
 function resize(){
   var r = cvs.getBoundingClientRect();
+  var cw = r.width || 960, ch = r.height || 540;
   var dpr = Math.min(window.devicePixelRatio || 1, 2);
-  cvs.width = Math.max(1, Math.round(r.width * dpr));
-  cvs.height = Math.max(1, Math.round(r.height * dpr));
-  scale = cvs.width / W;
+  cvs.width  = Math.max(1, Math.round(cw * dpr));
+  cvs.height = Math.max(1, Math.round(ch * dpr));
+
+  // 逻辑高度锁定，宽度跟着容器比例走 —— 手机横屏能铺满，不留黑边
+  H = BASE_H;
+  W = Math.round(clamp(H * (cw / ch), W_MIN, W_MAX));
+
+  // 统一缩放取小者（避免非等比拉伸糊像素），多出来的边居中留白
+  scale = Math.min(cvs.width / W, cvs.height / H);
+  offX = (cvs.width  - W * scale) / 2;
+  offY = (cvs.height - H * scale) / 2;
+
+  // 转屏 / 改窗口后，闲置的摇杆回到左下待命位
+  if(!stick.on && el.stick.classList.contains('show')) stickHome();
 }
 window.addEventListener('resize', resize);
+window.addEventListener('orientationchange', function(){ setTimeout(resize, 120); });
 
 // ================= 武器 / 被动定义 =================
 var WEAPONS = [
@@ -602,7 +726,7 @@ function stat(){
 function resetGame(){
   var maxHp = 120;
   P = {
-    x: WORLD/2, y: WORLD/2,
+    x: WORLD_W/2, y: WORLD_H/2,
     hp: maxHp, maxHp: maxHp,
     baseSpeed: 172, r: 15,
     level: 1, exp: 0, expNeed: 5,
@@ -715,8 +839,8 @@ function spawnEnemy(type){
   var tx = ca > 0.001 ? halfW/ca : Infinity;
   var ty = sa > 0.001 ? halfH/sa : Infinity;
   var rad = Math.min(tx, ty) + rand(10, 70);
-  var x = clamp(P.x + Math.cos(ang)*rad, 40, WORLD-40);
-  var y = clamp(P.y + Math.sin(ang)*rad, 40, WORLD-40);
+  var x = clamp(P.x + Math.cos(ang)*rad, 40, WORLD_W-40);
+  var y = clamp(P.y + Math.sin(ang)*rad, 40, WORLD_H-40);
   var hpMul = 1 + elapsed*0.012;
   var e = {
     x:x, y:y, type:type,
@@ -853,13 +977,17 @@ function update(dt){
     P.y += ny * speed * dt;
     if(nx !== 0) P.face = nx > 0 ? 1 : -1;
   }
-  P.x = clamp(P.x, 30, WORLD-30);
-  P.y = clamp(P.y, 30, WORLD-30);
+  P.x = clamp(P.x, 30, WORLD_W-30);
+  P.y = clamp(P.y, 30, WORLD_H-30);
 
   // --- 相机跟随 + 震动 ---
   cam.x += (P.x - cam.x) * Math.min(1, dt*8);
   cam.y += (P.y - cam.y) * Math.min(1, dt*8);
   if(shake > 0) shake = Math.max(0, shake - dt*22);
+
+  // 相机锁在战场内：横屏视野更宽，不锁的话贴边会看到大片战场外的空地
+  cam.x = (WORLD_W > W) ? clamp(cam.x, W/2, WORLD_W - W/2) : WORLD_W/2;
+  cam.y = (WORLD_H > H) ? clamp(cam.y, H/2, WORLD_H - H/2) : WORLD_H/2;
 
   // --- 无敌帧 / 回血 ---
   if(P.invuln > 0) P.invuln -= dt;
@@ -1087,7 +1215,7 @@ function update(dt){
       if(dist2(P.x,P.y,p.x,p.y) < pd2*pd2){ hurtPlayer(p.dmg); p.life = 0; }
     }
   }
-  projs = projs.filter(function(p){ return p.life > 0 && p.x>-40 && p.x<WORLD+40 && p.y>-40 && p.y<WORLD+40; });
+  projs = projs.filter(function(p){ return p.life > 0 && p.x>-40 && p.x<WORLD_W+40 && p.y>-40 && p.y<WORLD_H+40; });
 
   // --- 经验珠吸附与拾取 ---
   var pickR2 = pickR*pickR;
@@ -1160,7 +1288,12 @@ function normAngle(a){
 
 // ================= 渲染 =================
 function draw(){
-  ctx.setTransform(scale, 0, 0, scale, 0, 0);
+  // 先整块铺满草地：居中留白区才不会露出接缝
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.fillStyle = COL.grass1;
+  ctx.fillRect(0, 0, cvs.width, cvs.height);
+
+  ctx.setTransform(scale, 0, 0, scale, offX, offY);
   ctx.imageSmoothingEnabled = false;
 
   var sx = 0, sy = 0;
@@ -1396,7 +1529,7 @@ function drawGround(){
   // 战场边界（木栅）
   ctx.strokeStyle = 'rgba(122,74,42,0.55)';
   ctx.lineWidth = 6;
-  ctx.strokeRect(-cam.x+halfW, -cam.y+halfH, WORLD, WORLD);
+  ctx.strokeRect(-cam.x+halfW, -cam.y+halfH, WORLD_W, WORLD_H);
 }
 
 // ================= HUD =================
@@ -1453,6 +1586,17 @@ function renderWeaponBar(){
 }
 
 // ================= 流程控制 =================
+var IS_TOUCH = ('ontouchstart' in window) || (navigator.maxTouchPoints || 0) > 0;
+var hintTimer = 0;
+function flashHint(){
+  el.hintKey.textContent = IS_TOUCH
+    ? '屏幕任意处拖动即可走位 · 武器自动攻击'
+    : 'WASD / 方向键 移动 · P 暂停 · M 静音';
+  el.hintKey.classList.add('show');
+  clearTimeout(hintTimer);
+  hintTimer = setTimeout(function(){ el.hintKey.classList.remove('show'); }, 4000);
+}
+
 function startGame(){
   resetGame();
   el.menu.classList.add('hidden');
@@ -1460,7 +1604,10 @@ function startGame(){
   el.pauseOv.classList.add('hidden');
   el.levelup.classList.add('hidden');
   el.btnPause.classList.add('show');
+  // 摇杆先落在左下角「待命位」，手指按下时再跳到指下（浮动摇杆）
+  stickHome();
   el.stick.classList.add('show');
+  flashHint();
   state = 'play';
   last = performance.now();
   if(!frameId) frameId = requestAnimationFrame(loop);
@@ -1529,13 +1676,33 @@ window.addEventListener('keydown', function(e){
 window.addEventListener('keyup', function(e){ keys[e.key.toLowerCase()] = false; });
 window.addEventListener('blur', function(){ keys = {}; });
 
-// 触摸虚拟摇杆
-var stickRadius = 46;
-function stickStart(x, y, id){
+// 触摸虚拟摇杆（浮动式：手指落在哪，摇杆就长在哪，横屏双手拇指都够得着）
+var stickRadius = 50;      // 摇杆头最大行程（px，屏幕坐标）
+var STICK_HALF = 62;       // 摇杆底盘半径，与 CSS 的 124px 直径保持一致
+function gameRect(){
+  var g = document.getElementById('game');
+  return g.getBoundingClientRect();
+}
+// 松手后的「待命位」：左下角，避开右下武器栏
+function stickHome(){
+  var r = gameRect();
+  var w = r.width || 960, h = r.height || 540;
+  el.stick.style.left = clamp(100, STICK_HALF + 4, Math.max(STICK_HALF + 4, w - STICK_HALF - 4)) + 'px';
+  el.stick.style.top  = clamp(h - 100, STICK_HALF + 4, Math.max(STICK_HALF + 4, h - STICK_HALF - 4)) + 'px';
+  el.knob.style.transform = 'translate(0px, 0px)';
+}
+function stickStart(cx, cy, id){
   if(state !== 'play') return;
+  var r = gameRect();
+  var w = r.width || 960, h = r.height || 540;
+  // 落指处生成底盘，并整体夹在容器内（避免半个圆被切到屏幕外）
+  var x = clamp(cx - r.left, STICK_HALF + 4, Math.max(STICK_HALF + 4, w - STICK_HALF - 4));
+  var y = clamp(cy - r.top,  STICK_HALF + 4, Math.max(STICK_HALF + 4, h - STICK_HALF - 4));
   stick.on = true; stick.id = id;
-  stick.ox = x; stick.oy = y;
+  stick.ox = cx; stick.oy = cy;
   stick.dx = 0; stick.dy = 0;
+  el.stick.style.left = x + 'px';
+  el.stick.style.top  = y + 'px';
   el.knob.style.transform = 'translate(0px, 0px)';
 }
 function stickMove(x, y){
@@ -1593,6 +1760,23 @@ el.btnHome.addEventListener('click', backToMenu);
 el.btnResume.addEventListener('click', togglePause);
 el.btnQuit.addEventListener('click', backToMenu);
 el.btnPause.addEventListener('click', togglePause);
+
+// 全屏：iOS Safari 不支持非视频元素全屏，检测不到就隐藏按钮
+(function initFullscreen(){
+  var d = document.documentElement;
+  var canFs = !!(d.requestFullscreen || d.webkitRequestFullscreen);
+  if(!canFs){ el.btnFs.style.display = 'none'; return; }
+  el.btnFs.classList.add('show');
+  el.btnFs.addEventListener('click', function(){
+    try{
+      if(!document.fullscreenElement && !document.webkitFullscreenElement){
+        (d.requestFullscreen || d.webkitRequestFullscreen).call(d);
+      } else {
+        (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+      }
+    }catch(e){}
+  });
+})();
 
 // ================= 启动 =================
 buildSprites();

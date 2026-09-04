@@ -2,7 +2,7 @@
 
 > **UI Designer**：像素君 ｜ **设计日期**：2026-09-03 ｜ **状态**：可交付（含可玩原型）
 > **原型文件**：`grass-survivor-game.html`（单文件，Canvas 像素渲染 + DOM HUD/覆盖层）
-> **品类**：Roguelike 割草幸存者（Vampire Survivors-like）· 竖屏 9:16
+> **品类**：Roguelike 割草幸存者（Vampire Survivors-like）· 横屏 16:9（手机横屏优先）
 
 ---
 
@@ -254,15 +254,29 @@ font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 ### 5.1 分辨率策略
 
 ```js
-var W = 540, H = 960;        // 逻辑分辨率（9:16）
-dpr  = min(devicePixelRatio, 2);
-canvas.width  = round(rect.width * dpr);
-scale = canvas.width / W;    // 统一缩放因子
-ctx.setTransform(scale, 0, 0, scale, 0, 0);
+var BASE_H = 540;            // 逻辑高度锁定（横屏，高度优先）
+var W = 960, H = BASE_H;     // 逻辑分辨率（横屏 16:9 基准）
+var WORLD_W = 3400, WORLD_H = 2400;   // 战场为横长方形，匹配横屏视野比例
+const W_MIN = 720, W_MAX = 1400;      // 逻辑宽度夹取区间，防极端比例失真
+
+function resize(){
+  var r = cvs.getBoundingClientRect();
+  var cw = r.width, ch = r.height;
+  H = BASE_H;
+  W = clamp(round(H * (cw / ch)), W_MIN, W_MAX);  // 宽度按容器真实长宽比推导
+  dpr = min(devicePixelRatio, 2);
+  cvs.width  = round(r.width  * dpr);
+  cvs.height = round(r.height * dpr);
+  scale = min(cvs.width / W, cvs.height / H);
+  offX  = (cvs.width  - W * scale) / 2;   // 极端比例下居中（letterbox）
+  offY  = (cvs.height - H * scale) / 2;
+}
+ctx.setTransform(scale, 0, 0, scale, offX, offY);
 ctx.imageSmoothingEnabled = false;
 ```
 
-- 逻辑分辨率固定，**不随设备变化** —— 保证不同机型上战场可视范围一致（公平性）。
+- **横屏优先**：`#game` 容器 `width:100dvw / max-width:1400px`、`height:100dvh / max-height:780px`——手机横屏满铺**零黑边**，桌面封顶 1400×780 居中。逻辑高度锁死 540，宽度按容器真实长宽比在 `[720, 1400]` 内推导，保证不同机型视野一致且不变形。
+- 极端比例（超宽 21:9 / 接近正方 / 极矮）由 `offX/offY` 居中 letterbox 兜底，绝不拉伸。
 - `image-rendering: pixelated` + `imageSmoothingEnabled = false` 保证像素硬边。
 
 ### 5.2 三条性能红线
@@ -338,7 +352,7 @@ if (h > 0.80) 画 4×4 的 grass3 草丛;
 | 拾取半径 | 70 × 磁石倍率 | |
 | 生成距离 | 屏幕矩形外缘切线 + `rand(10,70)` | 见下 |
 
-> **生成位置的坑**：竖屏（540×960）下若用屏幕**对角线**半径生成，左右两侧的敌人要飞 10 秒才到 —— 开局极度冷清。改为沿**屏幕矩形外缘**的切线半径（`min(halfW/|cos|, halfH/|sin|)`），保证既不在视野内凭空出现、也不会远到干等。
+> **生成位置的坑**：若用屏幕**对角线**半径生成，远端敌人要飞 10 秒才到 —— 开局极度冷清。改为沿**屏幕矩形外缘**的切线半径（`min(halfW/|cos|, halfH/|sin|)`），保证既不在视野内凭空出现、也不会远到干等。（横屏下 `halfW > halfH`，敌人主要从左右两轴进入，符合单骑冲阵的包抄感。）
 
 > **刀刃判定的坑**：环绕类武器若在**圆周**上做点距离判定，敌人贴身（距离≈0）时圆周永远扫不到，会出现"明明砍到了却 0 击杀"。本作改用**以玩家为圆心的扇形 + 随距离放大的角容差**：`tol = atan2(20, max(dist, 14))` —— 越近容差越大，贴身围杀必中。
 
@@ -364,14 +378,14 @@ if (h > 0.80) 画 4×4 的 grass3 草丛;
 
 ## 九、与合集的一致性 & 刻意差异
 
-**遵守**：单文件零依赖、`9:16` 竖屏优先、键盘 + 触摸双输入、无限/限时双模式、`localStorage` 持久化最佳分、程序化 Web Audio、`prefers-reduced-motion`、空格/Enter 快捷开始。
+**遵守**：单文件零依赖、**横屏 16:9（手机横屏优先、零黑边）**、键盘 + 触摸双输入、无限/限时双模式、`localStorage` 持久化最佳分、程序化 Web Audio、`prefers-reduced-motion`、空格/Enter 快捷开始、竖屏自动提示「请横屏」。
 
 **刻意差异**（及理由）：
 
 | 项 | 合集惯例 | 本作 | 理由 |
 |----|---------|------|------|
 | 字体 | Google Fonts 像素体 | 系统等宽栈 | 同屏信息密度最高，像素体在 10–13px 不可读 |
-| 画布比例 | 240×400 / 类似 | 540×960 | 割草需要更大的可视范围来预判包围圈 |
+| 画布比例 | 240×400 / 类似 | 动态 16:9（基准 960×540，宽随设备长宽比推导，夹取 720–1400） | 割草需要更大的横向可视范围来预判包抄 |
 | HUD 位置 | 顶部一行 | 顶部三条 + 底部武器栏 | 信息量本身更大（经验/生命/Boss/等级/时间/斩敌/构筑） |
 | 主色 | 各游戏不同 | 青绿 + 朱红 + 鎏金 | 色相带避让，五款并列不撞脸 |
 
