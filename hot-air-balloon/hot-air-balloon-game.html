@@ -343,6 +343,7 @@
     </div>
   </div>
 
+<script src="../shared.js"></script>
 <script>
 "use strict";
 (function(){
@@ -487,10 +488,10 @@
     }
   }
   function mmReport(result, gain){
-    try{ localStorage.setItem('mm_result', JSON.stringify({result:result, gain:gain||0})); }catch(e){}
+    try{ SharedGame.Store.set('mm_result', {result:result, gain:gain||0}); }catch(e){}
     location.href='../mixed-mode/mixed-mode.html';
   }
-  best = parseInt(localStorage.getItem('hotAirBalloon.best')||'0',10) || 0;
+  best = SharedGame.Store.get('hotAirBalloon.best', 0);
 
   function reset(){
     balloon = { x:W/2, y:H-64, w:24, h:28, speed:230, vx:0, tilt:0 };
@@ -544,57 +545,46 @@
     }
   }
 
-  // ── 输入 ──
-  const keys = {};
-  window.addEventListener('keydown', e=>{
-    if(['ArrowLeft','ArrowRight','a','A','d','D'].includes(e.key)) keys[e.key]=true;
-    if(e.key==='p'||e.key==='P'||e.key==='Escape'){
-      if(state===STATE.PLAY) pause();
-      else if(state===STATE.PAUSE) resume();
-    }
-    if(e.key==='m'||e.key==='M'){ ensureAudio(); sfxOn=!sfxOn; applyMute(); }
-  });
-  window.addEventListener('keyup', e=>{ keys[e.key]=false; });
-
+  // ── 输入（复用 shared.js 的 SharedGame.Input）──
+  const keys = SharedGame.Input.keys;
   let dragId = null, dragX = null;
-  cv.addEventListener('pointerdown', e=>{
-    dragId = e.pointerId;
-    try { cv.setPointerCapture(e.pointerId); } catch(_) {}
-    dragX = toLogicalX(e.clientX);
-    e.preventDefault();
-  });
-  cv.addEventListener('pointermove', e=>{
-    if(dragX!==null && e.pointerId===dragId){
-      dragX = toLogicalX(e.clientX);
-      e.preventDefault();
+  SharedGame.Input.bindKeyboard({
+    prevent: ['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'],
+    onDown: function(k){
+      if(k==='p'||k==='P'||k==='Escape'){ if(state===STATE.PLAY) pause(); else if(state===STATE.PAUSE) resume(); }
+      if(k==='m'||k==='M'){ ensureAudio(); sfxOn=!sfxOn; applyMute(); }
     }
   });
+  SharedGame.Input.bindPointer(cv, {
+    down: function(p,e){ try{ cv.setPointerCapture(e.pointerId); }catch(_){} dragId=e.pointerId; dragX=p.x; if(e.preventDefault) e.preventDefault(); },
+    move: function(p,e){ if(dragId!==null && e.pointerId===dragId){ dragX=p.x; if(e.preventDefault) e.preventDefault(); } },
+    up: function(e){ endDrag(e); }
+  }, function(e,rect){ return { x: toLogicalX(e.clientX), y:0 }; });
   function endDrag(e){
     if(e && e.pointerId!==undefined && e.pointerId!==dragId) return;
     dragX=null; dragId=null;
   }
-  cv.addEventListener('pointerup', endDrag);
-  cv.addEventListener('pointercancel', endDrag);
   function toLogicalX(clientX){
     const r = cv.getBoundingClientRect();
     return (clientX - r.left) / r.width * W;
   }
 
   // ── 音频：Web Audio 程序化合成（零外部资源）──
+  const A = SharedGame.Audio;
   let AC=null, masterGain=null, bgmGain=null, sfxOn=true;
   let bgmTimer=null, bgmStep=0, bgmNextTime=0;
 
   function ensureAudio(){
-    if(AC){ if(AC.state==='suspended') AC.resume(); return; }
-    try{
-      AC = new (window.AudioContext||window.webkitAudioContext)();
+    A.ensure(); AC = A.ctx;
+    if(AC && AC.state==='suspended') AC.resume();
+    if(!masterGain){
       masterGain = AC.createGain();
       masterGain.gain.value = sfxOn ? 1 : 0;
       masterGain.connect(AC.destination);
       bgmGain = AC.createGain();
       bgmGain.gain.value = sfxOn ? 0.5 : 0;
       bgmGain.connect(masterGain);
-    }catch(_){ AC=null; }
+    }
   }
   function applyMute(){
     if(!AC) return;
@@ -1045,7 +1035,7 @@
     state=STATE.OVER;
     bgmStop(); sfx('gameover');
     const isNew = score > best;
-    if(isNew){ best=score; localStorage.setItem('hotAirBalloon.best', String(best)); }
+    if(isNew){ best=score; SharedGame.Store.set('hotAirBalloon.best', best); }
     document.getElementById('finalScore').textContent=score;
     document.getElementById('finalBest').textContent=best;
     document.getElementById('finalLevel').textContent=level()+1;

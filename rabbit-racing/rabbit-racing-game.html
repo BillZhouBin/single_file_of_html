@@ -257,6 +257,7 @@
   </div>
 </div>
 
+<script src="../shared.js"></script>
 <script>
 "use strict";
 
@@ -338,18 +339,21 @@ function applyMod(){
   }
 }
 function mmReport(result, gain){
-  try{ localStorage.setItem('mm_result', JSON.stringify({result:result, gain:gain||0})); }catch(e){}
+  if (typeof SharedGame!=='undefined') SharedGame.Store.setJSON('mm_result', {result:result, gain:gain||0});
+  else try{ localStorage.setItem('mm_result', JSON.stringify({result:result, gain:gain||0})); }catch(e){}
   location.href='../mixed-mode/mixed-mode.html';
 }
 let last = performance.now();
 let frameId;
 
-best = Number(localStorage.getItem('rabbitRacingBest') || 0);
+best = Number((typeof SharedGame!=='undefined' ? SharedGame.Store.get('rabbitRacingBest', 0) : localStorage.getItem('rabbitRacingBest')) || 0);
 
 // ---------- Audio ----------
 let AC = null, sfxOn = true, bgmInterval = null, bgmNext = 0;
+const A = (typeof SharedGame!=='undefined') ? SharedGame.Audio : null;
 
 function ensureAudio() {
+  if (A) { A.ensure(); AC = A.ctx; if (AC && AC.state==='suspended') AC.resume(); return; }
   if (!AC) {
     try { AC = new (window.AudioContext || window.webkitAudioContext)(); }
     catch(e){}
@@ -506,7 +510,10 @@ function gameOver() {
   if(CH){ mmReport('lose'); return; }
   screen = 'over';
   bgmStop(); sfx('over');
-  if (score > best) { best = score; localStorage.setItem('rabbitRacingBest', best); elNewRec.style.display = 'inline-block'; }
+  if (score > best) { best = score;
+    if (typeof SharedGame!=='undefined') SharedGame.Store.set('rabbitRacingBest', best);
+    else localStorage.setItem('rabbitRacingBest', best);
+    elNewRec.style.display = 'inline-block'; }
   else elNewRec.style.display = 'none';
   elEndScore.textContent = score;
   elEndBest.textContent = best;
@@ -542,12 +549,27 @@ setMode('infinite');
 document.getElementById('btnLeft').addEventListener('pointerdown', moveLeft);
 document.getElementById('btnRight').addEventListener('pointerdown', moveRight);
 
-window.addEventListener('keydown', e => {
-  if (e.key === 'ArrowLeft'  || e.key === 'a' || e.key === 'A') moveLeft();
-  if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') moveRight();
-  if (e.key === 'm' || e.key === 'M') { sfxOn = !sfxOn; applyMute(); showToast(sfxOn?'音效开启':'静音'); }
-  if (e.key === ' ' && screen==='menu') start();
-});
+function bindKey(){
+  if (typeof SharedGame!=='undefined'){
+    SharedGame.Input.bindKeyboard({
+      ArrowLeft:  moveLeft,
+      ArrowRight: moveRight,
+      a: moveLeft, A: moveLeft,
+      d: moveRight, D: moveRight,
+      ' ': ()=>{ if (screen==='menu') start(); },
+      m: ()=>{ sfxOn = !sfxOn; applyMute(); showToast(sfxOn?'音效开启':'静音'); },
+      M: ()=>{ sfxOn = !sfxOn; applyMute(); showToast(sfxOn?'音效开启':'静音'); }
+    });
+    return;
+  }
+  window.addEventListener('keydown', e => {
+    if (e.key === 'ArrowLeft'  || e.key === 'a' || e.key === 'A') moveLeft();
+    if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') moveRight();
+    if (e.key === 'm' || e.key === 'M') { sfxOn = !sfxOn; applyMute(); showToast(sfxOn?'音效开启':'静音'); }
+    if (e.key === ' ' && screen==='menu') start();
+  });
+}
+bindKey();
 
 // swipe
 let sx = 0, sy = 0;

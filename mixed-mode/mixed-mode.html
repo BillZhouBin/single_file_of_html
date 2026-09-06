@@ -150,9 +150,11 @@
   </div>
 </div>
 
+<script src="../shared.js"></script>
 <script>
 (function(){
   "use strict";
+  var SG = (typeof SharedGame!=='undefined') ? SharedGame : null;
   var GAMES = [
     {id:'plane', name:'像素飞机大战', icon:'✈️', file:'../plane-game/plane-war-game.html', color:'#ff7a59',
       obj:'活过 60 秒', chal:'pw_survive',
@@ -173,9 +175,9 @@
   ];
 
   var K_RUN='mm_run', K_PEND='mm_pending', K_RES='mm_result';
-  function lsGet(k){ try{return JSON.parse(localStorage.getItem(k));}catch(e){return null;} }
-  function lsSet(k,v){ try{localStorage.setItem(k,JSON.stringify(v));}catch(e){} }
-  function lsDel(k){ try{localStorage.removeItem(k);}catch(e){} }
+  function lsGet(k){ return SG ? SG.Store.getJSON(k) : (function(){ try{return JSON.parse(localStorage.getItem(k));}catch(e){return null;} })(); }
+  function lsSet(k,v){ if(SG) SG.Store.setJSON(k,v); else try{localStorage.setItem(k,JSON.stringify(v));}catch(e){} }
+  function lsDel(k){ if(SG) SG.Store.del(k); else try{localStorage.removeItem(k);}catch(e){} }
 
   var run = lsGet(K_RUN) || {score:0, round:1, best:0};
   run.best = run.best || 0;
@@ -328,12 +330,14 @@
     else if(awaitingNext){ awaitingNext=false; startWheel(); }
     else if(pending) navigate();
   });
-  document.addEventListener('keydown', function(e){
+  function keyHandler(e){
     if(e.code==='Space'){ e.preventDefault();
       if(sweeping) onStop();
       else if(awaitingNext){ awaitingNext=false; startWheel(); }
       else if(pending) navigate(); }
-  });
+  }
+  if(SG) SG.Input.bindKeyboard({ ' ': keyHandler, Space: keyHandler });
+  else document.addEventListener('keydown', keyHandler);
   // tap gauge to stop
   document.getElementById('svg').addEventListener('pointerdown', function(){ if(sweeping) onStop(); });
 

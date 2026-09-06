@@ -305,6 +305,7 @@
   </div>
 </div>
 
+<script src="../shared.js"></script>
 <script>
 (function(){
 'use strict';
@@ -420,10 +421,13 @@ function buildSprites(){
 
 // ================= 音频（程序化） =================
 var actx = null, muted = false;
+var SG = (typeof SharedGame!=='undefined') ? SharedGame : null;
 function ac(){
+  if(SG){ SG.Audio.ensure(); actx = SG.Audio.ctx; return actx; }
   if(!actx){
     try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e){ actx = null; }
   }
+  if(actx && actx.state==='suspended') actx.resume();
   return actx;
 }
 function tone(freq, dur, type, vol, slideTo){
@@ -1467,9 +1471,11 @@ function gameOver(cleared){
   el.stick.classList.remove('show');
   var score = Math.round(kills*10 + P.level*50 + Math.floor(elapsed)*2 + (cleared?500:0));
   var bestKey = 'yiqidangqian_best_' + mode;
-  var best = parseInt(localStorage.getItem(bestKey) || '0', 10);
+  var best = parseInt((SG? SG.Store.get(bestKey, 0) : localStorage.getItem(bestKey)) || '0', 10);
   var isNew = score > best;
-  if(isNew){ best = score; try{ localStorage.setItem(bestKey, String(best)); }catch(e){} }
+  if(isNew){ best = score;
+    if(SG) SG.Store.set(bestKey, String(best));
+    else try{ localStorage.setItem(bestKey, String(best)); }catch(e){} }
   el.overTitle.textContent = cleared ? '功成' : '败北';
   el.recordWrap.innerHTML = isNew ? '<div class="new-record">新纪录</div>' : '';
   el.resScore.textContent = score;

@@ -186,6 +186,7 @@
     </div>
   </div>
 
+<script src="../shared.js"></script>
 <script>
 (() => {
   "use strict";
@@ -480,7 +481,7 @@
   let score, best, lives, wave, elapsed, spawnTimer, fireTimer, shake, comboTimer, combo;
   let bossStage, bossNextAt, flameIdx, flameTimer;
   let pFrameIdx, pFrameTimer, eFrameIdx, eFrameTimer, bFrameIdx, bFrameTimer;
-  best = parseInt(localStorage.getItem('planeWar.best') || '0', 10);
+  best = SharedGame.Store.get('planeWar.best', 0);
 
   // ── 混合模式挑战钩子（仅当 URL 带 ?challenge= 时生效，无参数则完全不变）──
   var CH = (function(){ try{ var q=new URLSearchParams(location.search); var c=q.get('challenge'); return c?{ch:c, mod:q.get('mod')}:null; }catch(e){ return null; } })();
@@ -499,12 +500,12 @@
     }
   }
   function mmReport(result, gain){
-    try{ localStorage.setItem('mm_result', JSON.stringify({result:result, gain:gain||0})); }catch(e){}
+    try{ SharedGame.Store.set('mm_result', {result:result, gain:gain||0}); }catch(e){}
     location.href='../mixed-mode/mixed-mode.html';
   }
 
   // 输入
-  const keys = {};
+  const keys = SharedGame.Input.keys;
   let pointerActive = false, ptrX = W/2, ptrY = H-60;
 
   function initStars(){
@@ -674,13 +675,9 @@
   }
 
   // ── 音效：Web Audio 程序化合成（零外部资源，8-bit 像素风）──
+  const A = SharedGame.Audio;
   let AC = null, sfxOn = true;
-  function ensureAudio(){
-    if(!AC){
-      try{ AC = new (window.AudioContext || window.webkitAudioContext)(); }catch(_){}
-    }
-    if(AC && AC.state === 'suspended') AC.resume();
-  }
+  function ensureAudio(){ A.ensure(); AC = A.ctx; }
   // 单音合成：type=波形 | f0→f1 频率扫动 | dur 时长 | vol 音量 | delay 延迟秒
   function tone(type, f0, f1, dur, vol, delay){
     if(!AC) return;
@@ -768,28 +765,23 @@
     }
   }
 
-  // ── 输入事件 ──
-  window.addEventListener('keydown', e=>{
-    if(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown',' '].includes(e.key)) e.preventDefault();
-    keys[e.key] = true;
-    if((e.key==='m'||e.key==='M')){ sfxOn = !sfxOn; ensureAudio(); if(sfxOn){ sfx('ui'); if(state==='playing') bgmStart(); } else bgmStop(); }
-    if((e.key==='p'||e.key==='P'||e.key==='Escape')){
-      if(state==='playing') doPause();
-      else if(state==='paused') doResume();
+  // ── 输入事件（复用 shared.js 的 SharedGame.Input）──
+  SharedGame.Input.bindKeyboard({
+    prevent: ['ArrowLeft','ArrowRight','ArrowUp','ArrowDown',' '],
+    onDown: function(k){
+      if(k==='m'||k==='M'){ sfxOn = A.toggle(); if(sfxOn){ sfx('ui'); if(state==='playing') bgmStart(); } else bgmStop(); }
+      if(k==='p'||k==='P'||k==='Escape'){ if(state==='playing') doPause(); else if(state==='paused') doResume(); }
     }
   });
-  window.addEventListener('keyup', e=>{ keys[e.key]=false; });
-
-  function ptr(e){
-    const rect = cv.getBoundingClientRect();
+  SharedGame.Input.bindPointer(cv, {
+    down: function(p){ if(state!=='playing')return; pointerActive=true; ptrX=p.x; ptrY=p.y; },
+    move: function(p){ if(pointerActive && state==='playing'){ ptrX=p.x; ptrY=p.y; } },
+    up:   function(){ pointerActive=false; }
+  }, function(e, rect){
     const cx = (e.touches? e.touches[0].clientX : e.clientX) - rect.left;
-    ptrX = cx / rect.width * W;
-    ptrY = ((e.touches? e.touches[0].clientY : e.clientY) - rect.top) / rect.height * H;
-  }
-  cv.addEventListener('pointerdown', e=>{ if(state!=='playing')return; pointerActive=true; ptr(e); });
-  cv.addEventListener('pointermove', e=>{ if(pointerActive && state==='playing') ptr(e); });
-  window.addEventListener('pointerup', ()=>{ pointerActive=false; });
-  cv.addEventListener('touchstart', e=>e.preventDefault(), {passive:false});
+    const cy = (e.touches? e.touches[0].clientY : e.clientY) - rect.top;
+    return { x: cx / rect.width * W, y: cy / rect.height * H };
+  });
 
   // ── 按钮 ──
   const show = (o)=>o.classList.remove('hidden');
@@ -989,7 +981,7 @@
 
   function gameOver(){
     if(CH){ mmReport('lose'); return; }
-    if(score>best){ best=score; localStorage.setItem('planeWar.best', String(best)); }
+    if(score>best){ best=score; SharedGame.Store.set('planeWar.best', best); }
     el.finalScore.textContent = score;
     el.bestScore.textContent = best;
     setState('over');

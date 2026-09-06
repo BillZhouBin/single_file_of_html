@@ -227,6 +227,7 @@
   </div>
 </div>
 
+<script src="../shared.js"></script>
 <script>
 "use strict";
 
@@ -309,18 +310,28 @@ function applyMod(){
   }
 }
 function mmReport(result, gain){
-  try{ localStorage.setItem('mm_result', JSON.stringify({result:result, gain:gain||0})); }catch(e){}
+  if (typeof SharedGame!=='undefined') SharedGame.Store.setJSON('mm_result', {result:result, gain:gain||0});
+  else try{ localStorage.setItem('mm_result', JSON.stringify({result:result, gain:gain||0})); }catch(e){}
   location.href='../mixed-mode/mixed-mode.html';
 }
 let last = performance.now();
 let frameId;
 
-best = Number(localStorage.getItem('treasureBowlBest') || 0);
+// drag the bowl
+let dragging = false;
+function pointerToLogicalX(clientX) {
+  const rect = c.getBoundingClientRect();
+  return clamp((clientX - rect.left) / rect.width * W, bowlHalf, W - bowlHalf);
+}
+
+best = Number((typeof SharedGame!=='undefined' ? SharedGame.Store.get('treasureBowlBest', 0) : localStorage.getItem('treasureBowlBest')) || 0);
 
 // ---------- Audio ----------
 let AC = null, sfxOn = true, bgmInterval = null, bgmNext = 0;
+const A = (typeof SharedGame!=='undefined') ? SharedGame.Audio : null;
 
 function ensureAudio() {
+  if (A) { A.ensure(); AC = A.ctx; if (AC && AC.state==='suspended') AC.resume(); return; }
   if (!AC) {
     try { AC = new (window.AudioContext || window.webkitAudioContext)(); }
     catch (e) {}
@@ -474,7 +485,10 @@ function gameOver() {
   screen = 'over';
   bgmStop(); sfx('over');
   elPauseBtn.style.display = 'none';
-  if (score > best) { best = score; localStorage.setItem('treasureBowlBest', best); elNewRec.style.display = 'inline-block'; }
+  if (score > best) { best = score;
+    if (typeof SharedGame!=='undefined') SharedGame.Store.set('treasureBowlBest', best);
+    else localStorage.setItem('treasureBowlBest', best);
+    elNewRec.style.display = 'inline-block'; }
   else elNewRec.style.display = 'none';
   elEndScore.textContent = score;
   elEndBest.textContent = best;
@@ -511,34 +525,49 @@ elBtnInf.addEventListener('click', () => setMode('infinite'));
 elBtnTimed.addEventListener('click', () => setMode('timed'));
 setMode('infinite');
 
-window.addEventListener('keydown', e => {
-  if (e.key === 'ArrowLeft'  || e.key === 'a' || e.key === 'A') moveBy(-40);
-  if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') moveBy(40);
-  if (e.key === 'm' || e.key === 'M') { sfxOn = !sfxOn; applyMute(); showToast(sfxOn ? '音效开启' : '静音'); }
-  if (e.key === 'p' || e.key === 'P') { screen === 'play' ? pauseGame() : (screen === 'paused' && resumeGame()); }
-  if (e.key === ' ' && screen === 'menu') start();
-});
-
-// drag the bowl
-let dragging = false;
-function pointerToLogicalX(clientX) {
-  const rect = c.getBoundingClientRect();
-  return clamp((clientX - rect.left) / rect.width * W, bowlHalf, W - bowlHalf);
+function bindInput(){
+  if (typeof SharedGame!=='undefined'){
+    SharedGame.Input.bindKeyboard({
+      ArrowLeft:  ()=>moveBy(-40), ArrowRight: ()=>moveBy(40),
+      a: ()=>moveBy(-40), A: ()=>moveBy(-40),
+      d: ()=>moveBy(40),  D: ()=>moveBy(40),
+      m: ()=>{ sfxOn=!sfxOn; applyMute(); showToast(sfxOn?'音效开启':'静音'); },
+      M: ()=>{ sfxOn=!sfxOn; applyMute(); showToast(sfxOn?'音效开启':'静音'); },
+      p: ()=>{ screen==='play'?pauseGame():(screen==='paused'&&resumeGame()); },
+      P: ()=>{ screen==='play'?pauseGame():(screen==='paused'&&resumeGame()); },
+      ' ': ()=>{ if (screen==='menu') start(); }
+    });
+    SharedGame.Input.bindPointer(gameEl, {
+      onDown:(e)=>{ if(screen!=='play')return; dragging=true; targetX=pointerToLogicalX(e.clientX); try{gameEl.setPointerCapture(e.pointerId);}catch(_){} },
+      onMove:(e)=>{ if(!dragging||screen!=='play')return; targetX=pointerToLogicalX(e.clientX); },
+      onUp:()=>{ dragging=false; },
+      onCancel:()=>{ dragging=false; }
+    });
+    return;
+  }
+  window.addEventListener('keydown', e => {
+    if (e.key === 'ArrowLeft'  || e.key === 'a' || e.key === 'A') moveBy(-40);
+    if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') moveBy(40);
+    if (e.key === 'm' || e.key === 'M') { sfxOn = !sfxOn; applyMute(); showToast(sfxOn ? '音效开启' : '静音'); }
+    if (e.key === 'p' || e.key === 'P') { screen === 'play' ? pauseGame() : (screen === 'paused' && resumeGame()); }
+    if (e.key === ' ' && screen === 'menu') start();
+  });
+  gameEl.addEventListener('pointerdown', e => {
+    if (screen !== 'play') return;
+    dragging = true;
+    targetX = pointerToLogicalX(e.clientX);
+    try { gameEl.setPointerCapture(e.pointerId); } catch (_) {}
+  });
+  gameEl.addEventListener('pointermove', e => {
+    if (!dragging || screen !== 'play') return;
+    targetX = pointerToLogicalX(e.clientX);
+  });
+  function endDrag() { dragging = false; }
+  gameEl.addEventListener('pointerup', endDrag);
+  gameEl.addEventListener('pointercancel', endDrag);
+  gameEl.addEventListener('pointerleave', endDrag);
 }
-gameEl.addEventListener('pointerdown', e => {
-  if (screen !== 'play') return;
-  dragging = true;
-  targetX = pointerToLogicalX(e.clientX);
-  try { gameEl.setPointerCapture(e.pointerId); } catch (_) {}
-});
-gameEl.addEventListener('pointermove', e => {
-  if (!dragging || screen !== 'play') return;
-  targetX = pointerToLogicalX(e.clientX);
-});
-function endDrag() { dragging = false; }
-gameEl.addEventListener('pointerup', endDrag);
-gameEl.addEventListener('pointercancel', endDrag);
-gameEl.addEventListener('pointerleave', endDrag);
+bindInput();
 
 // ---------- Particles ----------
 function burst(x, y, color, count = 10) {

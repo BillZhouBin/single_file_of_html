@@ -201,7 +201,12 @@ single_file_of_html/
 
 ## 共享资源
 
-- **`sprite-rules.md`（位于合集根目录）** —— 像素精灵技术选型规则（尺寸红线 / 场景矩阵 / 硬性排除 / 性能红线 / 决策树）。它是**跨游戏通用**的，已上提到根目录做共享，所有 game 直接引用、避免重复维护。设计文档中以文件名引用即可，无需写相对路径。
+- **`sprite-rules.md`（位于合集根目录）** —— 像素精灵技术选型规则（尺寸红线 / 场景矩阵 / 硬性排除 / 性能红线 / 决策树）。它是**跨游戏通用**的，已上提到根目录做共享，所有 game 直接引用、避免重复维护。设计中以文件名引用即可，无需写相对路径。
+- **`shared.js`（位于合集根目录）** —— 跨游戏运行时共享模块（`window.SharedGame`）。所有 `.game.html` 在最顶部插入 `<script src="../shared.js"></script>`（`index.html` 用 `./shared.js`）。暴露三大工具：
+  - `SharedGame.Store` — `getJSON/setJSON/del/get/set` 容错包装，替代裸 `localStorage` 调用，**与 `mm_result/mm_run/mm_pending` 等跨游戏键完全兼容**。
+  - `SharedGame.Audio` — 全局 `AudioContext` 单例懒加载（旧手机不再被 6 个独立 AC 拖累）；每个游戏的 `ensureAudio` / `ac()` 委托给它，本地的 tone/noise/SFX 字典与 BGM 编排保持原状（音色设计归各游戏）。
+  - `SharedGame.Input` — `bindKeyboard(map)` / `bindPointer(el, handlers)` 归一键盘与触摸事件，避免 6 份重复 addEventListener；不依赖键位映射的自由形式（虚拟摇杆等）仍可保留本地。
+  - 各游戏接入时均带 fallback（检测到 `SharedGame` 则走共享，否则沿用本地实现），所以**直接双击单个 html 离线玩也没问题**（GitHub Pages 同级有 `shared.js` 时自动用上）。
 
 ---
 

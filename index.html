@@ -178,6 +178,21 @@
     border-color: var(--line); cursor: not-allowed; pointer-events: none;
   }
 
+  /* 最近游玩高亮 */
+  .card--recent {
+    border-color: var(--gold);
+    box-shadow: 0 0 0 1px rgba(255,210,63,0.4), 0 10px 24px -10px rgba(255,210,63,0.3);
+  }
+  .recent-label {
+    font-family: var(--font-read); font-size: 17px;
+    color: var(--gold); opacity: 0.92; order: 3;
+  }
+  .recent-label::before {
+    content: ""; display: inline-block; width: 7px; height: 7px; margin-right: 6px;
+    background: var(--gold); border-radius: 2px; box-shadow: 0 0 6px var(--gold);
+    vertical-align: middle;
+  }
+
   footer {
     border-top: 2px solid var(--line);
     margin-top: var(--space-12);
@@ -408,5 +423,46 @@
     <p>保持联网以加载像素字体（Google Fonts CDN），离线自动回退 monospace，不影响游玩。</p>
     <p class="sig">UI DESIGNER · 像素君</p>
   </footer>
+
+  <script>
+  (function () {
+    var KEY = 'gamehub.last.';
+    function idFromHref(h) {
+      // ./plane-game/plane-war-game.html -> plane-game
+      var m = h && h.match(/\.\/([^/]+)\//);
+      return m ? m[1] : null;
+    }
+    function rel(ts) {
+      var s = Math.floor((Date.now() - ts) / 1000);
+      if (s < 60) return '刚刚';
+      if (s < 3600) return Math.floor(s / 60) + ' 分钟前';
+      if (s < 86400) return Math.floor(s / 3600) + ' 小时前';
+      return Math.floor(s / 86400) + ' 天前';
+    }
+    // 点击「开始游戏」时记录时间戳
+    document.querySelectorAll('a.play-btn').forEach(function (a) {
+      a.addEventListener('click', function () {
+        var id = idFromHref(a.getAttribute('href'));
+        if (id) { try { localStorage.setItem(KEY + id, String(Date.now())); } catch (e) {} }
+      });
+    });
+    // 加载时回显最近游玩
+    document.querySelectorAll('.card:not(.card--soon)').forEach(function (card) {
+      var a = card.querySelector('a.play-btn');
+      var id = idFromHref(a && a.getAttribute('href'));
+      if (!id) return;
+      var ts = 0;
+      try { ts = parseInt(localStorage.getItem(KEY + id) || '0', 10); } catch (e) {}
+      if (!ts) return;
+      card.classList.add('card--recent');
+      var lab = document.createElement('div');
+      lab.className = 'recent-label';
+      lab.textContent = '最近游玩 · ' + rel(ts);
+      var badge = card.querySelector('.badge');
+      if (badge) badge.after(lab); else card.appendChild(lab);
+      setInterval(function () { lab.textContent = '最近游玩 · ' + rel(ts); }, 60000);
+    });
+  })();
+  </script>
 </body>
 </html>
