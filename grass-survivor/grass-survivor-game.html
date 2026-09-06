@@ -323,23 +323,44 @@ var COL = {
 };
 
 // ================= 像素精灵矩阵 =================
-var M_PLAYER = [
-  '......rr........',
-  '.....rrrr.......',
-  '...oggggggo.....',
-  '..oggggggggo....',
-  '..ogsssssgo.....',
-  '..ogsososgo.....',
-  '..ogsssssgo.....',
-  '.oGGGGGGGGGo....',
-  '.oGggggggggGo.ob',
-  '.oGggggggggGobbb',
-  '.oGgggRRgggGo.bB',
-  '.oGgggRRgggGo.h.',
-  '..oGGggggGGo..h.',
-  '..oGGooooGGo....',
-  '...oo....oo.....',
-  '...oo....oo.....'
+// 玩家：2 帧行走（剪刀步），与 ① 战机呼吸帧同思路
+var M_PLAYER_FRAMES = [
+  [  // 帧 0：双脚并拢
+    '......rr........',
+    '.....rrrr.......',
+    '...oggggggo.....',
+    '..oggggggggo....',
+    '..ogsssssgo.....',
+    '..ogsososgo.....',
+    '..ogsssssgo.....',
+    '.oGGGGGGGGGo....',
+    '.oGggggggggGo.ob',
+    '.oGggggggggGobbb',
+    '.oGgggRRgggGo.bB',
+    '.oGgggRRgggGo.h.',
+    '..oGGggggGGo..h.',
+    '..oGGooooGGo....',
+    '...oo....oo.....',
+    '...oo....oo.....'
+  ],
+  [  // 帧 1：左前右后（跨步）
+    '......rr........',
+    '.....rrrr.......',
+    '...oggggggo.....',
+    '..oggggggggo....',
+    '..ogsssssgo.....',
+    '..ogsososgo.....',
+    '..ogsssssgo.....',
+    '.oGGGGGGGGGo....',
+    '.oGggggggggGo.ob',
+    '.oGggggggggGobbb',
+    '.oGgggRRgggGo.bB',
+    '.oGgggRRgggGo.h.',
+    '..oGGggggGGo..h.',
+    '..oGGooooGGo....',
+    '...oo...oo......',
+    '..oo....oo......'
+  ]
 ];
 var PAL_PLAYER = {o:'#221a12',r:'#e23b3b',R:'#a01818',g:'#ffd23f',G:'#d98e16',s:'#ffd9a8',b:'#9be7ff',B:'#4a90b8',h:'#7a4a2a'};
 
@@ -363,8 +384,9 @@ var M_SHIELD = [
 ];
 var PAL_SHIELD = {o:'#2a2d3d',b:'#7a8394',B:'#4a5464'};
 
-var M_BOSS = [
-  '.RRRR...','.RKKRo..','.KsKso..','.KKKKo..','oKkkkKo.','oKkkkKo.','.oKKKo..','..oo....'
+var M_BOSS_FRAMES = [
+  ['.RRRR...','.RKKRo..','.KsKso..','.KKKKo..','oKkkkKo.','oKkkkKo.','.oKKKo..','..oo....'],
+  ['.RRRR...','.RKKRo..','.KsKso..','.KKKKo..','oKKKKKo.','oKKKKKo.','.oKKKo..','..oo....']
 ];
 var PAL_BOSS = {o:'#221a12',R:'#e23b3b',K:'#b8352f',k:'#e05a4a',s:'#ffd9a8'};
 
@@ -388,12 +410,12 @@ function bake(mtx, pal, scale){
 }
 var SPR = {};
 function buildSprites(){
-  SPR.player  = bake(M_PLAYER, PAL_PLAYER, 3);   // 48px
+  SPR.player  = [bake(M_PLAYER_FRAMES[0], PAL_PLAYER, 3), bake(M_PLAYER_FRAMES[1], PAL_PLAYER, 3)];   // 48px ×2 帧
   SPR.foot    = bake(M_FOOT, PAL_FOOT, 3);       // 24px
   SPR.arch    = bake(M_ARCH, PAL_ARCH, 3);
   SPR.rider   = bake(M_RIDER, PAL_RIDER, 3);
   SPR.shield  = bake(M_SHIELD, PAL_SHIELD, 3);
-  SPR.boss    = bake(M_BOSS, PAL_BOSS, 6);       // 48px
+  SPR.boss    = [bake(M_BOSS_FRAMES[0], PAL_BOSS, 6), bake(M_BOSS_FRAMES[1], PAL_BOSS, 6)];       // 48px ×2 帧
 }
 
 // ================= 音频（程序化） =================
@@ -544,6 +566,7 @@ var elapsed = 0, kills = 0, spawnAcc = 0, bossAcc = 0, shake = 0;
 var weapons = [], passives = {};
 var bossRef = null;
 var frameId = 0, last = 0;
+var pFrameIdx = 0, bFrameIdx = 0, animT = 0;   // 帧动画计时器
 var keys = {};
 var stick = {on:false, dx:0, dy:0, ox:0, oy:0, id:null};
 var grid = new Map();
@@ -796,6 +819,11 @@ var _nb = [];
 function update(dt){
   var st = stat();
   elapsed += dt;
+
+  // 帧动画推进（玩家 10fps 行走、Boss 5fps 推进器）
+  animT += dt;
+  pFrameIdx = Math.floor(animT*10) % 2;
+  bFrameIdx = Math.floor(animT*5) % 2;
 
   // --- 输入 → 移动 ---
   var ix = 0, iy = 0;
@@ -1182,7 +1210,7 @@ function draw(){
   for(var e=0; e<enemies.length; e++){
     var en = enemies[e];
     var ex = en.x + ox, ey = en.y + oy;
-    var sp = SPR[en.spr];
+    var sp = (en.type === 'boss') ? SPR.boss[bFrameIdx] : SPR[en.spr];
     if(!sp) continue;
     var hw = sp.width/2, hh = sp.height/2;
     if(ex < -hw-20 || ex > W+hw+20 || ey < -hh-20 || ey > H+hh+20) continue;
@@ -1193,7 +1221,8 @@ function draw(){
       var wob = Math.sin(elapsed*6)*0.04;
       ctx.scale(flip*(1+wob), 1-wob);
     } else {
-      ctx.scale(flip, 1);
+      var bob = 1 + Math.sin(elapsed*6 + e)*0.06;   // 敌人轻微上下浮动
+      ctx.scale(flip, bob);
     }
     ctx.drawImage(sp, -hw, -hh);
     if(en.flash > 0){
@@ -1265,7 +1294,7 @@ function draw(){
     ctx.translate(psx, psy);
     if(P.invuln > 0 && Math.floor(elapsed*20) % 2 === 0) ctx.globalAlpha = 0.45;
     ctx.scale(P.face, 1);
-    var psp = SPR.player;
+    var psp = SPR.player[pFrameIdx];
     ctx.drawImage(psp, -psp.width/2, -psp.height/2);
     ctx.restore();
     ctx.globalAlpha = 1;

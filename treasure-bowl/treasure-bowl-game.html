@@ -679,6 +679,8 @@ function drawBg() {
 function drawBowl(x) {
   const by = BOWL_Y;
   ctx.save(); ctx.translate(x, by);
+  const bowlSway = Math.sin(performance.now()/700)*0.04;   // 帧动画：轻微摇摆
+  ctx.rotate(bowlSway);
 
   // invuln flicker
   const flick = invulnTimer > 0 ? (Math.sin(performance.now() / 80) > 0 ? 0.45 : 1) : 1;
@@ -719,6 +721,7 @@ function drawBowl(x) {
 
 function drawIngot(x, y, s = 1) {
   ctx.save(); ctx.translate(x, y); ctx.scale(s, s);
+  ctx.rotate(Math.sin(performance.now()/260 + x)*0.15);   // 帧动画：元宝摇摆旋转
   ctx.fillStyle = 'rgba(0,0,0,0.15)'; ctx.beginPath(); ctx.ellipse(0, 18, 24, 7, 0, 0, Math.PI * 2); ctx.fill();
   ctx.fillStyle = '#e6a817';
   ctx.beginPath(); ctx.ellipse(0, 8, 24, 10, 0, 0, Math.PI * 2); ctx.fill();
@@ -736,6 +739,8 @@ function drawIngot(x, y, s = 1) {
 
 function drawCoin(x, y) {
   ctx.save(); ctx.translate(x, y);
+  const flip = Math.max(0.15, Math.abs(Math.cos(performance.now()/200 + x)));   // 帧动画：旋转翻面
+  ctx.scale(flip, 1);
   ctx.fillStyle = 'rgba(0,0,0,0.15)'; ctx.beginPath(); ctx.ellipse(0, 14, 16, 5, 0, 0, Math.PI * 2); ctx.fill();
   ctx.fillStyle = '#c9a24a'; ctx.beginPath(); ctx.arc(0, 0, 16, 0, Math.PI * 2); ctx.fill();
   ctx.strokeStyle = '#8a6d1f'; ctx.lineWidth = 3; ctx.stroke();
@@ -756,6 +761,7 @@ function drawBig(o) {
 function drawFu(o) {
   const x = o.x, y = o.y;
   ctx.save(); ctx.translate(x, y);
+  ctx.rotate(Math.sin(performance.now()/320 + x)*0.1);   // 帧动画：福字摆动
   ctx.fillStyle = 'rgba(0,0,0,0.15)'; ctx.beginPath(); ctx.ellipse(0, 16, 16, 5, 0, 0, Math.PI * 2); ctx.fill();
   ctx.fillStyle = '#e23b3b';
   ctx.beginPath(); ctx.arc(0, 2, 20, 0, Math.PI * 2); ctx.fill();
@@ -769,6 +775,9 @@ function drawFu(o) {
 function drawBomb(o) {
   const x = o.x, y = o.y;
   ctx.save(); ctx.translate(x, y);
+  const bp = 0.5 + 0.5*Math.sin(performance.now()/120);   // 帧动画：炸弹脉冲红光
+  ctx.fillStyle = 'rgba(255,60,40,'+(0.20*bp)+')';
+  ctx.beginPath(); ctx.arc(0, 2, 30, 0, Math.PI*2); ctx.fill();
   ctx.fillStyle = 'rgba(0,0,0,0.18)'; ctx.beginPath(); ctx.ellipse(0, 20, 18, 6, 0, 0, Math.PI * 2); ctx.fill();
   ctx.fillStyle = '#2a2d3d'; ctx.beginPath(); ctx.arc(0, 2, 22, 0, Math.PI * 2); ctx.fill();
   ctx.fillStyle = '#444a5e'; ctx.beginPath(); ctx.arc(-6, -4, 7, 0, Math.PI * 2); ctx.fill();

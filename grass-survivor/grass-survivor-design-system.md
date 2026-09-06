@@ -229,6 +229,8 @@ font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 
 **设计要点**：兜鍪占头部 7 列（够大才像武将），朱红盔缨做**唯一垂直向上的暖色尖**（在绿色战场上是最强识别点）；偃月刀画在右侧独立列，与人物身体分离，保证挥砍时的旋转动画不会糊在一起。
 
+**帧动画**：玩家武将升级为 `M_PLAYER_FRAMES[2]`（剪刀步跨步帧），渲染按 `SPR.player[pFrameIdx]`（10fps）切帧；Boss 沿用 `M_BOSS_FRAMES[2]`（推进器/体型帧，`SPR.boss[bFrameIdx]`，5fps）；普通敌军在渲染时按索引做 ±6% 竖向 bob，呈现"走动"律动。计时器统一在 `update()` 内由 `animT` 推进（与 ① 帧动画体系一致）。
+
 ### 4.2 敌军（均为 8×8，bake ×3 → 24px）
 
 | 兵种 | 矩阵 | 调色板 | 视觉编码 |

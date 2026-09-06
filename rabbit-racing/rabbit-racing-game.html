@@ -877,23 +877,37 @@ function drawPlayer(x) {
   ctx.fillStyle = '#fff7c2';
   ctx.beginPath(); ctx.arc(-24, -4, 7, 0, Math.PI*2); ctx.fill();
   ctx.beginPath(); ctx.arc(24, -4, 7, 0, Math.PI*2); ctx.fill();
-  // wheels
-  ctx.fillStyle = '#2a2d3d';
-  ctx.beginPath(); ctx.arc(-26, 26, 12, 0, Math.PI*2); ctx.fill();
-  ctx.beginPath(); ctx.arc(26, 26, 12, 0, Math.PI*2); ctx.fill();
-  ctx.fillStyle = '#888';
-  ctx.beginPath(); ctx.arc(-26, 26, 5, 0, Math.PI*2); ctx.fill();
-  ctx.beginPath(); ctx.arc(26, 26, 5, 0, Math.PI*2); ctx.fill();
+  // wheels (旋转辐条 — 帧动画)
+  const spin = performance.now()/120;
+  [-26, 26].forEach(function(wx){
+    ctx.fillStyle = '#2a2d3d';
+    ctx.beginPath(); ctx.arc(wx, 26, 12, 0, Math.PI*2); ctx.fill();
+    ctx.save(); ctx.translate(wx, 26); ctx.rotate(spin);
+    ctx.strokeStyle = '#8a8da3'; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(-8,0); ctx.lineTo(8,0); ctx.moveTo(0,-8); ctx.lineTo(0,8); ctx.stroke();
+    ctx.restore();
+    ctx.fillStyle = '#888';
+    ctx.beginPath(); ctx.arc(wx, 26, 5, 0, Math.PI*2); ctx.fill();
+  });
+
+  // rabbit (head + ears + face) — 帧动画：整体上下颠 + 耳朵摆动
+  const rt = performance.now();
+  const bob = Math.sin(rt/180)*2.5;
+  ctx.save(); ctx.translate(0, bob);
 
   // rabbit head
   ctx.fillStyle = '#fff';
   ctx.beginPath(); ctx.ellipse(0, -52, 28, 24, 0, 0, Math.PI*2); ctx.fill();
-  // ears
-  ctx.beginPath(); ctx.ellipse(-14, -78, 9, 22, -0.25, 0, Math.PI*2); ctx.fill();
-  ctx.beginPath(); ctx.ellipse(14, -78, 9, 22, 0.25, 0, Math.PI*2); ctx.fill();
-  ctx.fillStyle = '#ffd6e5';
-  ctx.beginPath(); ctx.ellipse(-14, -78, 4, 14, -0.25, 0, Math.PI*2); ctx.fill();
-  ctx.beginPath(); ctx.ellipse(14, -78, 4, 14, 0.25, 0, Math.PI*2); ctx.fill();
+  // ears (sway)
+  const earSway = Math.sin(rt/220)*0.16;
+  ctx.save(); ctx.translate(-14, -56); ctx.rotate(earSway - 0.25);
+  ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.ellipse(0, -22, 9, 22, 0, 0, Math.PI*2); ctx.fill();
+  ctx.fillStyle = '#ffd6e5'; ctx.beginPath(); ctx.ellipse(0, -22, 4, 14, 0, 0, Math.PI*2); ctx.fill();
+  ctx.restore();
+  ctx.save(); ctx.translate(14, -56); ctx.rotate(-earSway + 0.25);
+  ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.ellipse(0, -22, 9, 22, 0, 0, Math.PI*2); ctx.fill();
+  ctx.fillStyle = '#ffd6e5'; ctx.beginPath(); ctx.ellipse(0, -22, 4, 14, 0, 0, Math.PI*2); ctx.fill();
+  ctx.restore();
   // face
   ctx.fillStyle = '#2a2d3d';
   ctx.beginPath(); ctx.arc(-10, -56, 4, 0, Math.PI*2); ctx.fill();
@@ -902,6 +916,8 @@ function drawPlayer(x) {
   ctx.beginPath(); ctx.arc(0, -48, 6, 0, Math.PI*2); ctx.fill();
   ctx.strokeStyle = '#2a2d3d'; ctx.lineWidth = 2;
   ctx.beginPath(); ctx.arc(0, -46, 7, 0.2, Math.PI-0.2); ctx.stroke();
+
+  ctx.restore();
 
   // speed lines if boosting
   if (boostTimer > 0) {

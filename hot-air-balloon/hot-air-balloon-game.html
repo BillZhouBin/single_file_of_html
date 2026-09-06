@@ -370,15 +370,18 @@
   }
 
   // ── 精灵生成 ──
-  function buildBalloon(){
+  // 气球按 frame 做 3 帧「呼吸」形变：球体上下微浮 + 内部填充鼓起/收缩，飘动更生动
+  function buildBalloon(frame){
     const w=24, h=28, rows=[];
+    const dyOff = [0, -0.6, 0.6][frame % 3];   // 球体上下微浮
+    const rIn  = [10, 9.4, 10.6][frame % 3];   // 内部填充呼吸（鼓起/收缩）
     for(let y=0;y<h;y++){
       let line='';
       for(let x=0;x<w;x++){
         if(y<22){
-          const dx=x-11.5, dy=y-11, d=Math.sqrt(dx*dx+dy*dy);
+          const dx=x-11.5, dy=y-11-dyOff, d=Math.sqrt(dx*dx+dy*dy);
           if(d>11) line+='.';
-          else if(d>10) line+='O';
+          else if(d>rIn) line+='O';
           else line += (x%2===0)?'T':'S';
         } else if(y===22){
           line += (x===9||x===14)?'R':'.';
@@ -393,7 +396,7 @@
     }
     return rows;
   }
-  const BALLOON = buildBalloon();
+  const BALLOON_FRAMES = [buildBalloon(0), buildBalloon(1), buildBalloon(2)];
 
   function buildGem(){
     return [
@@ -963,7 +966,7 @@
     ctx.rotate(balloon.tilt);
     ctx.translate(-balloon.x, -balloon.y);
     if(inv>0){ ctx.globalAlpha = 0.55 + 0.45*Math.abs(Math.sin(elapsed*22)); }
-    drawSprite(BALLOON, pal, ox, oy);
+    drawSprite(BALLOON_FRAMES[Math.floor(elapsed*3.6)%3], pal, ox, oy);
     ctx.globalAlpha = 1;
     // 染色外发光
     if(invColor){
