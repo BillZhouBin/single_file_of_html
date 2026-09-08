@@ -570,13 +570,15 @@
   }
 
   // ── 音频：Web Audio 程序化合成（零外部资源）──
-  const A = SharedGame.Audio;
+  const A = (typeof SharedGame!=='undefined') ? SharedGame.Audio : null;
   let AC=null, masterGain=null, bgmGain=null, sfxOn=true;
   let bgmTimer=null, bgmStep=0, bgmNextTime=0;
 
   function ensureAudio(){
+    if(!A) return;                  // shared.js 未加载 → 静默降级，绝不让音频拖垮开始流程
     A.ensure(); AC = A.ctx;
-    if(AC && AC.state==='suspended') AC.resume();
+    if(!AC) return;                 // 无 WebAudio 支持 → 静默降级
+    if(AC.state==='suspended') AC.resume();
     if(!masterGain){
       masterGain = AC.createGain();
       masterGain.gain.value = sfxOn ? 1 : 0;

@@ -675,9 +675,9 @@
   }
 
   // ── 音效：Web Audio 程序化合成（零外部资源，8-bit 像素风）──
-  const A = SharedGame.Audio;
+  const A = (typeof SharedGame!=='undefined') ? SharedGame.Audio : null;
   let AC = null, sfxOn = true;
-  function ensureAudio(){ A.ensure(); AC = A.ctx; }
+  function ensureAudio(){ if(!A) return; A.ensure(); AC = A.ctx; }
   // 单音合成：type=波形 | f0→f1 频率扫动 | dur 时长 | vol 音量 | delay 延迟秒
   function tone(type, f0, f1, dur, vol, delay){
     if(!AC) return;

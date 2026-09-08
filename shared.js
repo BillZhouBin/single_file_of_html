@@ -30,7 +30,17 @@
     },
     del: function (key) {
       try { global.localStorage.removeItem(key); } catch (e) {}
-    }
+    },
+
+    // JSON 便捷方法：多款游戏按 getJSON/setJSON 调用，必须提供，
+    // 否则会因为「方法不存在」在初始化阶段直接抛错、按钮全绑不上。
+    getJSON: function (key, def) {
+      var v = Store.get(key, undefined);
+      if (v === undefined || v === null) return def;
+      if (typeof v === 'object') return v;          // get() 已解析过
+      try { return JSON.parse(v); } catch (e) { return def; }
+    },
+    setJSON: function (key, val) { return Store.set(key, val); }
   };
 
   /* ============ Audio：Web Audio 程序化音效（共享单例） ============ */
