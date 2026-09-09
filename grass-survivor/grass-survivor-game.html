@@ -554,6 +554,16 @@ function tone(freq, dur, type, vol, slideTo){
     o.start(); o.stop(a.currentTime + dur);
   }catch(e){}
 }
+// 音效限流：火焰/毒瘴/弹幕后期每帧对几十个敌人结算伤害，
+// 若每个命中都发声，振荡器每秒数百上千个叠放 → 持续的"兹拉"底噪。
+// 统一按最小间隔（ms）节流，保留打击反馈但杜绝叠音。
+var _lastSfx = {};
+function gateSfx(name, gapMs){
+  var t = performance.now();
+  if(t - (_lastSfx[name]||0) < gapMs) return true;  // 距上次不足 gap → 拦截
+  _lastSfx[name] = t;
+  return false;
+}
 var sfx = {
   kill:  function(){ tone(180, 0.07, 'square', 0.035, 90); },
   hit:   function(){ tone(300, 0.04, 'square', 0.02, 200); },
@@ -883,10 +893,10 @@ function damageEnemy(e, amt){
       for(var i=0;i<8;i++) gems.push({x:e.x+rand(-40,40), y:e.y+rand(-40,40), v:8, born:0});
       shake = Math.max(shake, 10);
     }
-    sfx.kill();
+    if(!gateSfx('kill', 45)) sfx.kill();
     addExp(e.exp);
   } else {
-    sfx.hit();
+    if(!gateSfx('hit', 80)) sfx.hit();
   }
 }
 function hurtPlayer(amt){
@@ -1230,7 +1240,7 @@ function update(dt){
       g.y += ((P.y-g.y)/gd) * pull;
       if(gd < P.r + 10){
         addExp(g.v);
-        sfx.pick();
+        if(!gateSfx('pick', 55)) sfx.pick();
         gems.splice(gi,1); gi--;
       }
     }
