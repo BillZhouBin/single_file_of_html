@@ -18,9 +18,9 @@
   #wrap{ width:min(940px, 96vw); }
   h1.logo{ font-family:'Press Start 2P', ui-monospace, monospace; font-size:14px;
     text-align:center; color:var(--text); margin:0 0 12px; text-shadow:3px 3px 0 var(--coral); }
-  #game{ position:relative; width:100%; aspect-ratio:16 / 9; border:2px solid var(--line);
+  #game{ position:relative; width:100%; border:2px solid var(--line);
     border-radius:10px; overflow:hidden; background:#000; box-shadow:0 10px 30px -12px rgba(0,0,0,.6); }
-  canvas{ width:100%; height:100%; display:block; image-rendering:pixelated; }
+  canvas{ position:absolute; inset:0; width:100%; height:100%; display:block; image-rendering:pixelated; }
   .overlay{ position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
     background:rgba(8,11,28,.82); backdrop-filter:blur(2px); text-align:center; padding:16px; }
   .overlay.hidden{ display:none; }
@@ -105,15 +105,26 @@
     var scale = 1, logicalW = 960, dinoX = 120;
 
     function resize() {
-      var rect = gameEl.getBoundingClientRect();
+      // 显式按 16:9 计算容器高度，避免依赖 CSS aspect-ratio 导致 canvas 百分比高度塌缩为 0
+      var w = gameEl.clientWidth
+            || (gameEl.parentElement && gameEl.parentElement.clientWidth)
+            || Math.min(940, window.innerWidth * 0.96);
+      if (!w) return;
+      var h = Math.round(w * 9 / 16);
+      gameEl.style.height = h + 'px';
       var dpr = window.devicePixelRatio || 1;
-      cv.width = Math.max(1, Math.floor(rect.width * dpr));
-      cv.height = Math.max(1, Math.floor(rect.height * dpr));
+      cv.width = Math.max(1, Math.floor(w * dpr));
+      cv.height = Math.max(1, Math.floor(h * dpr));
       scale = cv.height / BASE_H;
       logicalW = cv.width / scale;
       dinoX = Math.max(80, logicalW * 0.14);
     }
     window.addEventListener('resize', resize);
+    window.addEventListener('load', resize);
+    if (window.ResizeObserver) {
+      // 观察外层 #wrap 宽度变化（不影响自身高度，避免循环触发）
+      new ResizeObserver(resize).observe(gameEl.parentElement || gameEl);
+    }
 
     /* ---------- 状态 ---------- */
     var state = 'menu';          // menu | playing | paused | over
