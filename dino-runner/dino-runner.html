@@ -391,6 +391,7 @@
 
     /* ---------- 启动 ---------- */
     resize();
+    reset(); // 初始化 obstacles 等状态：否则菜单态首帧 draw 读到 undefined 会抛 TypeError，RAF 循环死亡 → 点击开始后画面永久冻结
     showOverlay('像素恐龙跑酷', '空格 / ↑ 跳跃，↓ 蹲下躲避翼龙。<br>跳过仙人掌、躲开翼龙，活得越久分越高！', '▶ 开始游戏');
     requestAnimationFrame(frame);
   })();
