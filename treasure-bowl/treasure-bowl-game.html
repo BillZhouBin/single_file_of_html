@@ -527,15 +527,17 @@ setMode('infinite');
 
 function bindInput(){
   if (typeof SharedGame!=='undefined'){
+    // 注意：bindKeyboard 接口是 { prevent, onDown(key), onUp(key) }，不是键名映射对象
+    // （此前误传 {ArrowLeft: ..., ...} → opts.onDown 为 undefined → 键盘完全无效）
     SharedGame.Input.bindKeyboard({
-      ArrowLeft:  ()=>moveBy(-40), ArrowRight: ()=>moveBy(40),
-      a: ()=>moveBy(-40), A: ()=>moveBy(-40),
-      d: ()=>moveBy(40),  D: ()=>moveBy(40),
-      m: ()=>{ sfxOn=!sfxOn; applyMute(); showToast(sfxOn?'音效开启':'静音'); },
-      M: ()=>{ sfxOn=!sfxOn; applyMute(); showToast(sfxOn?'音效开启':'静音'); },
-      p: ()=>{ screen==='play'?pauseGame():(screen==='paused'&&resumeGame()); },
-      P: ()=>{ screen==='play'?pauseGame():(screen==='paused'&&resumeGame()); },
-      ' ': ()=>{ if (screen==='menu') start(); }
+      prevent: [' ', 'ArrowLeft', 'ArrowRight'],
+      onDown: function (k) {
+        if (k === 'ArrowLeft'  || k === 'a' || k === 'A') moveBy(-40);
+        else if (k === 'ArrowRight' || k === 'd' || k === 'D') moveBy(40);
+        else if (k === 'm' || k === 'M') { sfxOn=!sfxOn; applyMute(); showToast(sfxOn?'音效开启':'静音'); }
+        else if (k === 'p' || k === 'P') { screen==='play'?pauseGame():(screen==='paused'&&resumeGame()); }
+        else if (k === ' ' && screen==='menu') start();
+      }
     });
     SharedGame.Input.bindPointer(gameEl, {
       onDown:(e)=>{ if(screen!=='play')return; dragging=true; targetX=pointerToLogicalX(e.clientX); try{gameEl.setPointerCapture(e.pointerId);}catch(_){} },

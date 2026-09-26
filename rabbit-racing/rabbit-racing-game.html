@@ -551,14 +551,16 @@ document.getElementById('btnRight').addEventListener('pointerdown', moveRight);
 
 function bindKey(){
   if (typeof SharedGame!=='undefined'){
+    // 注意：bindKeyboard 接口是 { prevent, onDown(key), onUp(key) }，不是键名映射对象
+    // （此前误传 {ArrowLeft: moveLeft, ...} → opts.onDown 为 undefined → 键盘完全无效）
     SharedGame.Input.bindKeyboard({
-      ArrowLeft:  moveLeft,
-      ArrowRight: moveRight,
-      a: moveLeft, A: moveLeft,
-      d: moveRight, D: moveRight,
-      ' ': ()=>{ if (screen==='menu') start(); },
-      m: ()=>{ sfxOn = !sfxOn; applyMute(); showToast(sfxOn?'音效开启':'静音'); },
-      M: ()=>{ sfxOn = !sfxOn; applyMute(); showToast(sfxOn?'音效开启':'静音'); }
+      prevent: [' ', 'ArrowLeft', 'ArrowRight'],
+      onDown: function (k) {
+        if (k === 'ArrowLeft'  || k === 'a' || k === 'A') moveLeft();
+        else if (k === 'ArrowRight' || k === 'd' || k === 'D') moveRight();
+        else if (k === 'm' || k === 'M') { sfxOn = !sfxOn; applyMute(); showToast(sfxOn?'音效开启':'静音'); }
+        else if (k === ' ' && screen === 'menu') start();
+      }
     });
     return;
   }

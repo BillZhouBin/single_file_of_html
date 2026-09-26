@@ -336,7 +336,10 @@
       else if(awaitingNext){ awaitingNext=false; startWheel(); }
       else if(pending) navigate(); }
   }
-  if(SG) SG.Input.bindKeyboard({ ' ': keyHandler, Space: keyHandler });
+  // 注意：bindKeyboard 接口是 { prevent, onDown(key, e) }，不是键名映射对象
+  // （此前误传 {' ': keyHandler, ...} → opts.onDown 为 undefined → 空格无效）
+  // keyHandler 需要原始事件对象（读 e.code），onDown 的第二参就是它
+  if(SG) SG.Input.bindKeyboard({ prevent: [' '], onDown: function (k, e) { keyHandler(e); } });
   else document.addEventListener('keydown', keyHandler);
   // tap gauge to stop
   document.getElementById('svg').addEventListener('pointerdown', function(){ if(sweeping) onStop(); });
