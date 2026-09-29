@@ -1,0 +1,725 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#ffffff">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<title>Hot Air Balloon · 热气球</title>
+<!-- 内联图标：避免浏览器请求 favicon.ico 产生 404（保持控制台零错误、且不引入外部资源） -->
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M16 2C9.4 2 5 7.1 5 13c0 4.6 3.2 8.3 6 10.6V26h10v-2.4c2.8-2.3 6-6 6-10.6C27 7.1 22.6 2 16 2z' fill='%23F14D38'/%3E%3Cpath d='M16 2c-3.3 0-6 4.9-6 11s2.7 11 6 11 6-4.9 6-11S19.3 2 16 2z' fill='%23FFC416'/%3E%3Crect x='11' y='26' width='10' height='4' fill='%236E7072'/%3E%3C/svg%3E">
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html, body {
+    width:100%; height:100%; overflow:hidden; background:#e9eaec;
+    -webkit-user-select:none; user-select:none;
+    -webkit-tap-highlight-color:transparent;
+    font-family:"Helvetica Neue", Helvetica, Arial, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  }
+  body { display:flex; align-items:center; justify-content:center; touch-action:none; }
+  #stage {
+    position:relative; background:#fff;
+    box-shadow:0 2px 24px rgba(0,0,0,.18);
+    touch-action:none; overflow:hidden;
+  }
+  canvas { display:block; width:100%; height:100%; image-rendering:pixelated; image-rendering:-moz-crisp-edges; }
+</style>
+</head>
+<body>
+<div id="stage"><canvas id="cv"></canvas></div>
+<script>
+(function () {
+'use strict';
+
+/* ============================================================
+   世界坐标：宽 640，高 1362（与原始录像 640x1422 去除浏览器栏一致）
+   所有绘制尺寸均以此为准，等比缩放铺满容器，保证任何设备手感一致
+   ============================================================ */
+var W = 640, H = 1362;
+
+/* 原始录像采样得到的配色。
+   墨色定标：不能取轮廓线的平均（抗锯齿会把均值拉亮，实测均值 110,112,116），
+   必须取大面积纯色区（「开始」/「再玩一次」按钮内部）的直方图众数 → 亮度 96~99、RGB (95,98,101) */
+var COL = {
+  bg:    '#ffffff',
+  ink:   '#5F6265',   // 尖刺板 / 暂停图标 / 按钮底色 / 吊篮 / 气泡（实色区实测 97）
+  hud:   '#545454',   // 计分数字 / 标题 / 退出（实测极小值 82~91）
+  greet: '#767676',   // 右侧「<最高分>，您好！」明显比当前分更浅（实测极小值 117）
+  gore:  ['#F14D38', '#FFC416', '#4294F4'],  // 红 / 黄 / 蓝（实测核心像素）
+  coinRim: ['#A8321E', '#B8860F', '#2F6DB5'],// 三种道具币的外圈深色
+  coin:    ['#E8503A', '#FFC430', '#5B9BF5'],// 三种道具币的盘面色
+  bolt:  '#FEC72C'
+};
+
+/* ---- 定标方法：录像为 24fps（nominalFrameRate=24.28、minFrameDuration=0.04），
+   故一律用 copyCGImage(at:actualTime:) 回填的真实帧时刻求导；用标称 dt 会引入 ±24% 锯齿 ----
+
+   速度：逐帧板速回归（round1 n=272、round2 n=935，0.5s 分箱）
+        round1  v = 342.6 + 9.578 t   -> v(9.0) = 428.8
+        round2  v = 123.4 + 9.656 t   -> v(31.0) = 422.7
+        两局斜率差 0.8% -> SPEED_RAMP = 9.6；两局起点差 6px/s -> BASE_SPEED = 425
+
+   计分：分数是两个通道之和（气泡 + 时间分），用 OCR 逐帧解码两局分数曲线验证：
+        round1  距离点 34 + 气泡 39×10 = 424  == 结束画面 424  （完全闭合）
+        round2  距离点 388 + 气泡 115×10 = 1538 ≈ 结束画面 1540
+    其中「距离点」通道并非按滚动距离触发，而是按游戏时间：
+        按累计滚动量 A 拟合  DP = 2.45e-5 · A^1.5578   （n=120，MAE 6.01 分，最大相对误差 29.3%）
+        按游戏时间 τ 拟合    DP = 0.129245·τ^1.943     （MAE 3.81 分）
+        -> 时间模型显著更优；两局曲线在 22.53s 平移下几乎重合 */
+var BALLOON_GAP    = 520;        // 尖刺板行间距（世界像素）
+var UNIT           = W / 19.2;   // 33.333 —— 板宽与位置网格（原作 1 单位 = 屏宽 1/19.2）
+var SCORE_C        = 0.129245;   // 时间分系数  DP = SCORE_C · τ^SCORE_P
+var SCORE_P        = 1.943;      // 时间分指数
+var SCORE_TAU0     = 0.8;        // 本局计时原点偏移（秒）
+var BUBBLE_POINT   = 10;         // 每颗气泡 +10 分（若为 +20 则 100 次拾取得 2000 > 总分 1540，故排除）
+var BASE_SPEED     = 425;        // 起始滚动速度 px/s（世界坐标）
+var SPEED_RAMP     = 9.6;        // 每秒增速
+var SPEED_CAP      = 1500;       // 录像最长 101s 内未触及上限（实测最高 1024px/s）
+var IMMUNE_TIME    = 10;         // 道具无敌持续（录像实测彩虹窗口 ≈9.5s）
+var PU_FIRST_MIN   = 3,  PU_FIRST_MAX = 7;    // 每局首个道具的生成时刻（录像实测 0.8s / 6.3s）
+var PU_GAP_MIN     = 32, PU_GAP_MAX   = 42;   // 后续生成间隔（录像实测 37.2s）
+var GORE_STEP      = 0.25;       // 气囊配色步进（录像实测 0.21~0.25s）
+var COIN_STEP      = 1 / 6;      // 道具币配色步进（录像实测 4 帧 = 0.1667s）
+
+/* ---------------- 精灵：低分辨率像素块，缓存成离屏画布 ---------------- */
+var CELL = 2;  // 1 个像素块 = 2 世界像素（还原原作的 2x 像素颗粒）
+function sprite(cols, rows, paint) {
+  var cv = document.createElement('canvas');
+  cv.width = cols * CELL; cv.height = rows * CELL;
+  var g = cv.getContext('2d');
+  g.imageSmoothingEnabled = false;
+  function px(c, r, color) { g.fillStyle = color; g.fillRect(c * CELL, r * CELL, CELL, CELL); }
+  paint(px, g, cols, rows);
+  return cv;
+}
+/* 1 世界像素 = 1 画布像素的精灵（气泡的八边形环需要 1px 精度） */
+function sprite1(w, h, paint) {
+  var cv = document.createElement('canvas');
+  cv.width = w; cv.height = h;
+  var g = cv.getContext('2d');
+  g.imageSmoothingEnabled = false;
+  paint(g, w, h);
+  return cv;
+}
+
+/* ============ 气球：27 x 49 格 = 54 x 98 世界像素 ============
+   逐像素实测（录像 640x1422 帧坐标，气囊圆心 y=854.5）：
+     气囊轮廓 y 819..891（高 73，半轴 36.5）、最宽 54（半轴 27）
+     三片气囊宽 12 / 2 / 26 / 2 / 12（格：6 / 1 / 13 / 1 / 6）
+     吊索 y 888..900 自内向外下方张开；吊篮 y 901..915（上宽 27、下宽 19，带两条白色竖缝）
+   格坐标下气囊圆心 = (13.5, 18.5) */
+var BL_COLS = 27, BL_ROWS = 49;
+var BL_CX = 13.5, BL_CY = 18.5;     // 气囊圆心（格）
+var BL_A = 13.4, BL_B = 18.2;       // 气囊半轴（格）
+function envelopeCell(c, r) {
+  var dx = Math.abs(c + 0.5 - BL_CX), dy = Math.abs(r + 0.5 - BL_CY);
+  return Math.pow(dx / BL_A, 2) + Math.pow(dy / BL_B, 2) <= 1;
+}
+function goreOf(c) {                 // 三片气囊：6 / 1 / 13 / 1 / 6
+  if (c <= 5) return 0;
+  if (c === 6) return -1;            // 白色分隔线
+  if (c <= 19) return 1;
+  if (c === 20) return -1;
+  return 2;
+}
+function makeBalloon(startIdx) {     // startIdx = null 时画成单色墨（未开始状态）
+  return sprite(BL_COLS, BL_ROWS, function (px) {
+    var c, r, gi;
+    for (r = 0; r < 37; r++) for (c = 0; c < BL_COLS; c++) {
+      if (!envelopeCell(c, r)) continue;
+      gi = goreOf(c);
+      if (gi < 0) continue;                                  // 分隔线留白
+      px(c, r, startIdx === null ? COL.ink : COL.gore[(gi + startIdx) % 3]);
+    }
+    /* 吊索：两条 1 格宽的斜线，由气囊底部（列 10 / 16）向外下方张至吊篮上沿 */
+    for (r = 36; r <= 41; r++) {
+      var k = (r - 36) / 5;                                   // 0..1
+      var lc = Math.round(10 - k * 2), rc = Math.round(16 + k * 2);
+      px(lc, r, COL.ink);
+      px(rc, r, COL.ink);
+    }
+    /* 吊篮：上段 26px 宽（列 7..19）+ 两条白色竖缝（列 9 / 16）；下段 18px 宽（列 9..17） */
+    for (r = 42; r <= 45; r++) for (c = 7; c <= 19; c++) {
+      px(c, r, (c === 9 || c === 16) ? COL.bg : COL.ink);
+    }
+    for (r = 46; r <= 48; r++) for (c = 9; c <= 17; c++) px(c, r, COL.ink);
+  });
+}
+var SPR = {};
+SPR.balloonInk = makeBalloon(null);
+/* 三色轮转：录像实测每 0.25s 步进一格，序列为 蓝红黄 → 黄蓝红 → 红黄蓝 → …（循环）
+   且仅在道具生效期间出现；道具生效瞬间相位归零，即必定从「蓝红黄」起 */
+SPR.balloonGore = [0, 1, 2].map(function (n) { return makeBalloon((2 - n + 3) % 3); });
+
+/* ============ 气泡：33x33 世界像素的八边形环 + 左上内侧「点 + 竖痕」高光 ============
+   实测：墨迹 29x29、环厚 4px；高光为一个 4x4 的点与其左下方 4x8 的竖痕 */
+/* 只追加一条子路径，绝不重置路径 —— 重置会把外八边形整条丢掉，
+   内八边形直接被填实，气泡就退化成实心块（录像里明确是空心环） */
+function octPath(g, x, y, w, h, cut) {
+  g.moveTo(x + cut, y);
+  g.lineTo(x + w - cut, y);
+  g.lineTo(x + w, y + cut);
+  g.lineTo(x + w, y + h - cut);
+  g.lineTo(x + w - cut, y + h);
+  g.lineTo(x + cut, y + h);
+  g.lineTo(x, y + h - cut);
+  g.lineTo(x, y + cut);
+  g.closePath();
+}
+SPR.bubble = sprite1(33, 33, function (g) {
+  g.fillStyle = COL.ink;
+  g.beginPath();
+  octPath(g, 2, 2, 29, 29, 6);       // 外八边形（墨迹 29x29，与录像逐像素一致）
+  octPath(g, 6, 6, 21, 21, 4);       // 内八边形（同一条路径 + evenodd → 挖空成环，环厚 4）
+  g.fill('evenodd');
+  /* 高光痕：录像放大后是「左上内侧一个点 + 一道竖痕」（各约 4px 宽） */
+  g.fillRect(13, 8, 4, 4);
+  g.fillRect(8, 12, 4, 8);
+});
+SPR.bubbleDim = SPR.bubble;
+
+/* ============ 道具币：38x38 世界像素的八边形圆盘 ============
+   实测：盘面亮色 + 外圈深色（约 4px）+ 左上白色新月高光 + 中央黄色闪电 */
+function coinSprite(variant, glyph) {
+  return sprite(19, 19, function (px) {
+    var c, r, u, v, d, s;
+    for (r = 0; r < 19; r++) for (c = 0; c < 19; c++) {
+      u = c + 0.5 - 9.5; v = r + 0.5 - 9.5;
+      d = Math.max(Math.abs(u), Math.abs(v));
+      s = Math.abs(u) + Math.abs(v);
+      if (d > 9.2 || s > 14.2) continue;                    // 八边形外轮廓
+      px(c, r, s > 11.6 ? COL.coinRim[variant] : COL.coin[variant]);
+    }
+    /* 左上新月高光（半径 6 格、厚 1.5 格，角度 140°~220°） */
+    for (r = 0; r < 19; r++) for (c = 0; c < 19; c++) {
+      u = c + 0.5 - 9.5; v = r + 0.5 - 9.5;
+      var dist = Math.sqrt(u * u + v * v);
+      var ang = Math.atan2(v, u) * 180 / Math.PI;
+      if (Math.abs(dist - 6.0) <= 1.5 && ang >= 140 && ang <= 220) px(c, r, '#ffffff');
+    }
+    glyph(px);
+  });
+}
+function boltGlyph(px) {
+  var m = [
+    '...#...',
+    '..##...',
+    '.###...',
+    '#####..',
+    '..###..',
+    '...##..',
+    '..##...',
+    '..#....'
+  ];
+  for (var r = 0; r < m.length; r++) for (var c = 0; c < 7; c++) {
+    if (m[r][c] === '#') px(6 + c, 6 + r, COL.bolt);
+  }
+}
+/* 道具币只有一种外观：三色轮转的盘面 + 中央黄色闪电。
+   录像实测三枚币的形状、图标、变色周期完全一致，故种类不在币面上区分 */
+SPR.coinRot = [0, 1, 2].map(function (k) { return coinSprite(k, boltGlyph); });
+
+/* ---------------- 画布与自适应 ---------------- */
+var stage = document.getElementById('stage');
+var cv = document.getElementById('cv');
+var ctx = cv.getContext('2d');
+var scale = 1, dpr = 1;
+
+function resize() {
+  dpr = Math.min(window.devicePixelRatio || 1, 3);
+  var vw = window.innerWidth, vh = window.innerHeight;
+  scale = Math.min(vw / W, vh / H);
+  var cssW = Math.floor(W * scale), cssH = Math.floor(H * scale);
+  stage.style.width = cssW + 'px';
+  stage.style.height = cssH + 'px';
+  cv.width = Math.floor(cssW * dpr);
+  cv.height = Math.floor(cssH * dpr);
+  ctx.setTransform(cv.width / W, 0, 0, cv.height / H, 0, 0);
+  ctx.imageSmoothingEnabled = false;
+}
+window.addEventListener('resize', resize);
+window.addEventListener('orientationchange', function () { setTimeout(resize, 120); });
+
+/* ---------------- 游戏状态 ---------------- */
+var G = {
+  state: 'ready',        // ready | playing | paused | over
+  time: 0,
+  scroll: 0,
+  pickScore: 0,
+  score: 0,
+  best: 0,
+  ballX: W / 2,
+  targetX: W / 2,
+  keyDir: 0,
+  boards: [],
+  bubbles: [],
+  powerups: [],
+  nextRowAt: 0,
+  bubbleTimer: 0,
+  puTimer: 0,
+  immune: 0,
+  gorePhase: 0,
+  shake: 0,
+  readyBoards: [],
+  readyBallX: 320,
+  poppers: []
+};
+
+var BEST_KEY = 'hot_air_balloon_best_v1';
+try { G.best = parseInt(localStorage.getItem(BEST_KEY) || '0', 10) || 0; } catch (e) { G.best = 0; }
+
+/* ---- 计分：两个通道之和（由录像两局分数曲线逐帧解码后归因得出）----
+   时间分  DP(τ) = floor(SCORE_C · τ^SCORE_P)，τ = 本局游戏秒数 + SCORE_TAU0
+           录像中的「跳分」并非按滚动距离触发，而与游戏时间的高次曲线吻合
+   气泡分  每颗 +BUBBLE_POINT，累计在 pickScore 上，与时间分互不干扰 */
+function timeScore(t) {
+  var tau = t + SCORE_TAU0;
+  return tau <= 0 ? 0 : Math.floor(SCORE_C * Math.pow(tau, SCORE_P));
+}
+function addPickScore(n) {
+  G.pickScore += n;
+  G.score = timeScore(G.time) + G.pickScore;
+}
+
+/* 定位常量（世界坐标 = 录像帧坐标 − 60px 状态栏，逐像素对齐） */
+var BALL_Y      = 794;      // 气囊圆心（帧 y 854.5）
+var BALL_RX     = 26;       // 气囊碰撞半轴（轮廓 27 x 36.5，判定略放宽）
+var BALL_RY     = 35;
+var BUBBLE_SZ   = 33;       // 气泡精灵边长（墨迹 29 + 两侧各 2px 透明边）
+var BUBBLE_R    = 14;       // 气泡外径 29 → 半径 14.5，判定略收
+var BOARD_BEAM  = 9;        // 横梁厚度（帧 y 423..432）
+var BOARD_LONG  = 11;       // 长齿在梁下的伸出量（总高 20）
+var BOARD_SHORT = 4;        // 短齿在梁下的伸出量（总高 13）
+var TOOTH_STEP  = UNIT / 5; // 齿距 6.667（实测 6.7）
+var TOOTH_W     = 4;
+/* HUD 版面：全部按「帧坐标 − 60」定标，逐像素对齐录像 */
+var SCORE_X     = 58, SCORE_Y = 83, SCORE_SIZE = 24;   // 录像墨迹 x 59..94、帧 y 126..142
+var BEST_X      = 187;      // 游戏中问候语起点（录像墨迹 x 188）
+var BEST_X_OVER = 204;      // 结束画面问候语右移 17px（录像墨迹 x 205）
+var PAUSE_X     = 549, PAUSE_Y = 63, PAUSE_W = 7, PAUSE_H = 23, PAUSE_GAP = 13;
+var BTN_W       = 246, BTN_H = 61, BTN_TXT = 23;
+var READY_BTN_Y = 1036;     // 帧 y 1097..1157
+var OVER_BTN_Y  = 831;      // 帧 y 892..952
+var TITLE_Y1    = 532, TITLE_Y2 = 640, TITLE_SIZE = 84;  // 帧墨迹 520..591 / 626..699
+var EXIT_Y      = 965;      // 「退出」基线（帧墨迹底 1025）
+var READY_BALL_DY = 26;     // 准备界面的气球比游戏中低 26px（帧 843..938 vs 819..914）
+
+/* 按钮矩形（世界坐标） */
+var RECT_READY = { x: (W - BTN_W) / 2, y: READY_BTN_Y, w: BTN_W, h: BTN_H };
+var RECT_OVER  = { x: (W - BTN_W) / 2, y: OVER_BTN_Y,  w: BTN_W, h: BTN_H };
+var RECT_EXIT  = { x: (W - BTN_W) / 2, y: EXIT_Y - 22, w: BTN_W, h: 44 };
+var RECT_PAUSE = { x: PAUSE_X - 16, y: PAUSE_Y - 16, w: 70, h: 60 };
+
+function resetRun() {
+  G.time = 0; G.scroll = 0; G.pickScore = 0; G.score = 0;
+  G.boards = []; G.bubbles = []; G.powerups = []; G.poppers = [];
+  G.nextRowAt = 620; G.bubbleTimer = 0;
+  G.puTimer = PU_FIRST_MIN + Math.random() * (PU_FIRST_MAX - PU_FIRST_MIN);
+  G.immune = 0; G.gorePhase = 0; G.shake = 0;
+  G.ballX = 324; G.targetX = 324;
+}
+
+/* 准备界面的装饰板与装饰气泡（取自录像 t=6.5s 静止画面） */
+G.readyBoards = [
+  { x: 64,  w: 133, y: 297 },
+  { x: 0,   w: 200, y: 571 },
+  { x: 448, w: 191, y: 845 }
+];
+G.readyBubbles = [
+  { x: 143, y: 227 }, { x: 447, y: 193 }, { x: 409, y: 297 }
+];
+
+/* ---------------- 关卡生成 ---------------- */
+var WIDTH_STEPS = [2, 3, 4, 5, 6, 7, 8, 9, 10];      // 以 UNIT=33.33 为单位
+var WIDTH_WEIGHTS = [10, 14, 18, 16, 14, 10, 8, 6, 4];
+
+function pickWidth() {
+  var total = 0, i;
+  for (i = 0; i < WIDTH_WEIGHTS.length; i++) total += WIDTH_WEIGHTS[i];
+  var v = Math.random() * total;
+  for (i = 0; i < WIDTH_WEIGHTS.length; i++) { v -= WIDTH_WEIGHTS[i]; if (v <= 0) return WIDTH_STEPS[i] * UNIT; }
+  return 4 * UNIT;
+}
+
+function spawnBoardRow() {
+  var w = pickWidth();
+  var overhang = 60;                        // 允许伸出屏幕外
+  var minVis = Math.min(UNIT * 1.5, w);     // 至少露出 1.5 格，避免"看不见却占一行"
+  var needGap = BALL_RX * 2 + 60;           // 必须留出比气球宽裕的连续通道
+  var x, tries = 0, visible, gap;
+  do {
+    x = -overhang + Math.random() * (W - w + overhang * 2);
+    x = Math.round(x / UNIT) * UNIT;
+    visible = Math.min(x + w, W) - Math.max(x, 0);
+    gap = Math.max(x, W - (x + w));         // 连续通道 = 板靠得较松的一侧到屏幕边
+    if (visible >= minVis && gap >= needGap) break;
+    tries++;
+  } while (tries < 40);
+  if (tries >= 40) {
+    /* 兜底：把板压到一侧，另一侧留出确定可行的通道（窄板有时整块落在屏外） */
+    var keep = Math.min(w, Math.max(UNIT * 2, w * 0.6));
+    x = G.ballX < W / 2 ? (W - keep) : -(w - keep);
+  }
+  G.boards.push({ x: x, w: w, y: -60 });
+}
+
+function spawnBubble() {
+  var x = 40 + Math.random() * (W - 80);
+  G.bubbles.push({ x: x, y: -30, s: 1 });
+  /* 偶尔带出小串，形成录像里那种斜向散布 */
+  var n = Math.random() < 0.35 ? 1 + Math.floor(Math.random() * 2) : 0;
+  for (var i = 0; i < n; i++) {
+    G.bubbles.push({
+      x: Math.max(30, Math.min(W - 30, x + (Math.random() - 0.5) * 150)),
+      y: -30 - (i + 1) * (70 + Math.random() * 60),
+      s: 1
+    });
+  }
+}
+
+/* 录像中三枚道具币的外观、变色周期完全一致；拾取后一律出现 ≈10s 的彩虹+无敌
+   （逐帧验证：t=76.46~77.79 气球与尖刺板相交 5 帧而该局未结束）。
+   未观察到减速或吸附类效果，故只保留「无敌」一种道具 */
+function spawnPowerup() {
+  G.powerups.push({
+    x: 60 + Math.random() * (W - 120), y: -40, type: 'immune',
+    t: 0, col0: Math.floor(Math.random() * 3)      // 逐枚随机的起始配色
+  });
+}
+
+/* ---------------- 更新 ---------------- */
+function update(dt) {
+  if (G.state !== 'playing') {
+    if (G.shake > 0) G.shake = Math.max(0, G.shake - dt * 4);
+    for (var p = G.poppers.length - 1; p >= 0; p--) {
+      G.poppers[p].t += dt;
+      if (G.poppers[p].t > 0.45) G.poppers.splice(p, 1);
+    }
+    return;
+  }
+
+  if (G.immune > 0) G.immune -= dt;
+  G.time += dt;
+  if (G.immune > 0) G.gorePhase += dt;   // 三色气囊只在无敌期间轮转
+
+  var speed = Math.min(BASE_SPEED + SPEED_RAMP * G.time, SPEED_CAP);
+  var dy = speed * dt;
+  G.scroll += dy;
+
+  /* 计分 = 时间分（随游戏时间加速的曲线） + 气泡分 */
+  G.score = timeScore(G.time) + G.pickScore;
+
+  /* 气球横向跟随：指数平滑（时间常数 0.17s）+ 限速
+     录像实测横移可达 600~1100 px/s，故限速取 1600 */
+  if (G.keyDir !== 0) G.targetX += G.keyDir * 760 * dt;
+  G.targetX = Math.max(34, Math.min(W - 34, G.targetX));
+  var k = 1 - Math.exp(-dt / 0.17);
+  var d = (G.targetX - G.ballX) * k;
+  var maxStep = 1600 * dt;
+  if (d > maxStep) d = maxStep; else if (d < -maxStep) d = -maxStep;
+  G.ballX += d;
+  G.ballX = Math.max(34, Math.min(W - 34, G.ballX));
+
+  /* 生成尖刺板 */
+  if (G.scroll >= G.nextRowAt) {
+    spawnBoardRow();
+    G.nextRowAt += BALLOON_GAP;
+  }
+  /* 生成气泡 */
+  G.bubbleTimer -= dt;
+  if (G.bubbleTimer <= 0) {
+    spawnBubble();
+    G.bubbleTimer = 0.13 + Math.random() * 0.14;
+  }
+  /* 生成道具 */
+  G.puTimer -= dt;
+  if (G.puTimer <= 0) {
+    spawnPowerup();
+    G.puTimer = PU_GAP_MIN + Math.random() * (PU_GAP_MAX - PU_GAP_MIN);
+  }
+
+  var i, e;
+
+  /* 尖刺板 */
+  for (i = G.boards.length - 1; i >= 0; i--) {
+    e = G.boards[i];
+    e.y += dy;
+    if (e.y > H + 40) { G.boards.splice(i, 1); continue; }
+    if (G.immune <= 0 && hitBoard(e)) { die(); return; }
+  }
+
+  /* 气泡 */
+  for (i = G.bubbles.length - 1; i >= 0; i--) {
+    e = G.bubbles[i];
+    e.y += dy;
+    if (e.y > H + 40) { G.bubbles.splice(i, 1); continue; }
+    if (ellipseHitsCircle(G.ballX, BALL_Y, BALL_RX, BALL_RY, e.x, e.y, BUBBLE_R)) {
+      G.bubbles.splice(i, 1);
+      addPickScore(BUBBLE_POINT);
+      G.poppers.push({ x: e.x, y: e.y, t: 0 });
+    }
+  }
+
+  /* 道具：拾取即进入无敌，并把配色相位归零 */
+  for (i = G.powerups.length - 1; i >= 0; i--) {
+    e = G.powerups[i];
+    e.t += dt;
+    e.y += dy;
+    if (e.y > H + 40) { G.powerups.splice(i, 1); continue; }
+    if (ellipseHitsCircle(G.ballX, BALL_Y, BALL_RX, BALL_RY, e.x, e.y, 17)) {
+      G.powerups.splice(i, 1);
+      G.immune = IMMUNE_TIME;
+      G.gorePhase = 0;                       // 录像实测：彩虹必从「蓝红黄」起
+      G.poppers.push({ x: e.x, y: e.y, t: 0, big: true });
+    }
+  }
+
+  for (var p = G.poppers.length - 1; p >= 0; p--) {
+    G.poppers[p].t += dt;
+    if (G.poppers[p].t > 0.45) G.poppers.splice(p, 1);
+  }
+}
+
+/* 碰撞：气囊近似为椭圆，与矩形/圆做几何判定 */
+function ellipseHitsRect(cx, cy, rx, ry, x0, y0, x1, y1) {
+  var nx = Math.max(x0, Math.min(cx, x1));
+  var ny = Math.max(y0, Math.min(cy, y1));
+  var dx = (cx - nx) / rx, dy = (cy - ny) / ry;
+  return dx * dx + dy * dy <= 1;
+}
+function ellipseHitsCircle(cx, cy, rx, ry, px, py, r) {
+  var dx = (cx - px) / (rx + r), dy = (cy - py) / (ry + r);
+  return dx * dx + dy * dy <= 1;
+}
+function hitBoard(b) {
+  return ellipseHitsRect(G.ballX, BALL_Y, BALL_RX, BALL_RY,
+    b.x + 1, b.y - 1, b.x + b.w - 1, b.y + BOARD_BEAM + BOARD_LONG);
+}
+
+function die() {
+  G.state = 'over';
+  G.shake = 1;
+  if (G.score > G.best) {
+    G.best = G.score;
+    try { localStorage.setItem(BEST_KEY, String(G.best)); } catch (e) {}
+  }
+}
+
+/* ---------------- 绘制 ---------------- */
+function rr(x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+function drawText(txt, x, y, size, color, align, weight) {
+  ctx.font = (weight || '400') + ' ' + size + 'px "Helvetica Neue", Helvetica, Arial, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif';
+  ctx.fillStyle = color;
+  ctx.textAlign = align || 'left';
+  ctx.textBaseline = 'alphabetic';
+  ctx.fillText(txt, x, y);
+}
+
+function drawBoard(b) {
+  ctx.fillStyle = COL.ink;
+  ctx.fillRect(b.x, b.y, b.w, BOARD_BEAM);
+  /* 细齿梳：齿距 UNIT/5（实测 6.7px），齿宽 4，隔一齿加长 */
+  var i = 0;
+  for (var x = b.x; x < b.x + b.w - 1; x += TOOTH_STEP, i++) {
+    var tw = Math.min(TOOTH_W, b.x + b.w - x);
+    if (tw <= 0) break;
+    var len = (i % 2 === 0) ? BOARD_LONG : BOARD_SHORT;
+    ctx.fillRect(x, b.y + BOARD_BEAM, tw, len);
+  }
+}
+
+/* 气球：气囊圆心对齐 (x, y)。
+   三色轮转只在无敌期间出现（录像实测：整局 83s 内仅 3 段彩虹窗口，与 3 次拾取一一对应，每段 ≈9.5s） */
+function drawBalloon(x, y) {
+  var img = (G.immune > 0)
+    ? SPR.balloonGore[Math.floor(G.gorePhase / GORE_STEP) % 3]   // 每 GORE_STEP 步进一格
+    : SPR.balloonInk;                                            // 其余时刻一律单色墨
+  ctx.drawImage(img, Math.round(x - BL_CX * CELL), Math.round(y - BL_CY * CELL),
+                BL_COLS * CELL, BL_ROWS * CELL);
+}
+
+function drawPoppers() {
+  for (var i = 0; i < G.poppers.length; i++) {
+    var p = G.poppers[i];
+    var k = p.t / 0.45;
+    ctx.strokeStyle = COL.ink;
+    ctx.globalAlpha = 1 - k;
+    ctx.lineWidth = 2;
+    var R = (p.big ? 16 : 12) + k * (p.big ? 26 : 20);
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, R, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+}
+
+/* HUD：准备界面完全不画（录像 t=6.0~7.0 的准备页没有任何 HUD）；
+   结束画面只画分数与问候语，不画暂停图标，且问候语右移 17px（录像逐帧实测） */
+function drawHUD() {
+  drawText(String(G.score), SCORE_X, SCORE_Y, SCORE_SIZE, COL.hud, 'left');
+  if (G.best > 0) {
+    var gx = (G.state === 'over') ? BEST_X_OVER : BEST_X;
+    drawText(G.best + '，您好！', gx, SCORE_Y, SCORE_SIZE, COL.greet, 'left');
+  }
+  if (G.state !== 'over') {
+    ctx.fillStyle = COL.ink;
+    ctx.fillRect(PAUSE_X, PAUSE_Y, PAUSE_W, PAUSE_H);
+    ctx.fillRect(PAUSE_X + PAUSE_GAP, PAUSE_Y, PAUSE_W, PAUSE_H);
+  }
+}
+
+function drawButton(rect, label) {
+  ctx.fillStyle = COL.ink;
+  rr(rect.x, rect.y, rect.w, rect.h, 4);
+  ctx.fill();
+  drawText(label, rect.x + rect.w / 2, rect.y + rect.h / 2 + BTN_TXT * 0.36, BTN_TXT, '#ffffff', 'center');
+}
+
+function render() {
+  ctx.save();
+  ctx.fillStyle = COL.bg;
+  ctx.fillRect(0, 0, W, H);
+
+  if (G.state === 'ready') {
+    var i;
+    for (i = 0; i < G.readyBoards.length; i++) drawBoard(G.readyBoards[i]);
+    for (i = 0; i < G.readyBubbles.length; i++) {
+      var rb = G.readyBubbles[i];
+      ctx.drawImage(SPR.bubble, Math.round(rb.x - BUBBLE_SZ / 2), Math.round(rb.y - BUBBLE_SZ / 2), BUBBLE_SZ, BUBBLE_SZ);
+    }
+    drawBalloon(G.readyBallX, BALL_Y + READY_BALL_DY);
+    drawButton(RECT_READY, '开始');
+  } else {
+    /* 仅游戏中渲染场地：暂停/结束时为零秒切白，与录像一致 */
+    if (G.state === 'playing') {
+      if (G.shake > 0) {
+        var s = G.shake * 6;
+        ctx.translate((Math.random() - 0.5) * s, (Math.random() - 0.5) * s);
+      }
+      for (var b = 0; b < G.boards.length; b++) drawBoard(G.boards[b]);
+      for (var u = 0; u < G.powerups.length; u++) {
+        var e = G.powerups[u], img;
+        img = SPR.coinRot[(Math.floor(e.t / COIN_STEP) + e.col0) % 3];
+        ctx.drawImage(img, Math.round(e.x - 19), Math.round(e.y - 19), 38, 38);
+      }
+      for (var k = 0; k < G.bubbles.length; k++) {
+        var bb = G.bubbles[k];
+        ctx.drawImage(SPR.bubble, Math.round(bb.x - BUBBLE_SZ / 2), Math.round(bb.y - BUBBLE_SZ / 2), BUBBLE_SZ, BUBBLE_SZ);
+      }
+      drawPoppers();
+      drawBalloon(G.ballX, BALL_Y);
+    }
+
+    drawHUD();
+
+    /* 暂停：录像中未出现暂停画面，按最小侵入实现——只冻结世界，不叠加任何文字/按钮 */
+    if (G.state === 'over') {
+      drawText('游戏', W / 2, TITLE_Y1, TITLE_SIZE, COL.hud, 'center');
+      drawText('结束', W / 2, TITLE_Y2, TITLE_SIZE, COL.hud, 'center');
+      drawButton(RECT_OVER, '再玩一次');
+      drawText('退出', W / 2, EXIT_Y, BTN_TXT, COL.hud, 'center');
+    }
+  }
+  ctx.restore();
+}
+
+/* ---------------- 主循环 ---------------- */
+var lastT = 0;
+function loop(ts) {
+  if (!lastT) lastT = ts;
+  var dt = Math.min((ts - lastT) / 1000, 0.05);
+  lastT = ts;
+  update(dt);
+  render();
+  requestAnimationFrame(loop);
+}
+
+/* ---------------- 输入 ---------------- */
+function toWorld(clientX, clientY) {
+  var r = cv.getBoundingClientRect();
+  return { x: (clientX - r.left) / r.width * W, y: (clientY - r.top) / r.height * H };
+}
+function inRect(p, r) { return p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h; }
+
+var dragging = false;
+function startGame() { resetRun(); G.state = 'playing'; }
+
+function onDown(ev) {
+  var t = ev.touches ? ev.touches[0] : ev;
+  var p = toWorld(t.clientX, t.clientY);
+
+  if (G.state === 'ready') {
+    if (inRect(p, RECT_READY)) startGame();
+    return;
+  }
+  if (G.state === 'over') {
+    if (inRect(p, RECT_OVER)) { startGame(); return; }
+    if (inRect(p, RECT_EXIT)) { G.state = 'ready'; return; }
+    return;
+  }
+  if (G.state === 'paused') { G.state = 'playing'; return; }   // 任意位置点击即继续
+  if (inRect(p, RECT_PAUSE)) { G.state = 'paused'; return; }
+
+  dragging = true;
+  G.targetX = p.x;
+  if (ev.cancelable) ev.preventDefault();
+}
+
+function onMove(ev) {
+  if (G.state !== 'playing') return;
+  var isTouch = !!ev.touches;
+  var t = (ev.touches && ev.touches.length) ? ev.touches[0] : ev;
+  if (!t) return;
+  var p = toWorld(t.clientX, t.clientY);
+  /* 桌面端鼠标悬停即跟随，但避开右上角暂停按钮 */
+  if (!isTouch && inRect(p, { x: PAUSE_X - 40, y: PAUSE_Y - 30, w: 110, h: 90 })) return;
+  G.targetX = Math.max(34, Math.min(W - 34, p.x));
+  if (isTouch && ev.cancelable) ev.preventDefault();
+}
+function onUp() { dragging = false; }
+
+cv.addEventListener('touchstart', onDown, { passive: false });
+cv.addEventListener('touchmove', onMove, { passive: false });
+cv.addEventListener('touchend', onUp);
+cv.addEventListener('touchcancel', onUp);
+cv.addEventListener('mousedown', function (e) { onDown(e); });
+window.addEventListener('mousemove', function (e) { onMove(e); });
+window.addEventListener('mouseup', onUp);
+cv.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+
+window.addEventListener('keydown', function (e) {
+  if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') { G.keyDir = -1; e.preventDefault(); }
+  else if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') { G.keyDir = 1; e.preventDefault(); }
+  else if (e.key === ' ' || e.key === 'Enter') {
+    e.preventDefault();
+    if (G.state === 'ready') startGame();
+    else if (G.state === 'over') startGame();
+    else if (G.state === 'paused') G.state = 'playing';
+  } else if (e.key === 'Escape' || e.key === 'p' || e.key === 'P') {
+    if (G.state === 'playing') G.state = 'paused';
+    else if (G.state === 'paused') G.state = 'playing';
+  }
+});
+window.addEventListener('keyup', function (e) {
+  if (['ArrowLeft', 'ArrowRight', 'a', 'A', 'd', 'D'].indexOf(e.key) >= 0) G.keyDir = 0;
+});
+document.addEventListener('visibilitychange', function () {
+  if (document.hidden && G.state === 'playing') G.state = 'paused';
+});
+
+resize();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
