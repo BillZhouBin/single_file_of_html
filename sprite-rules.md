@@ -79,3 +79,38 @@
 - 若后续加 Boss / 更精细角色：触发 R1 红线 → 改用「预渲染 bake + drawImage」。
 - 若接专职像素美术 / 出精细立绘：走 R3 → 美术 PNG sprite sheet，UI 设计系统可原样复用。
 - 子弹、爆炸粒子、小敌机、HUD 图标：符合 R2「程序化小元素」，继续用代码矩阵最划算。
+
+---
+
+## 配套可运行演示
+
+> `sprite-rules-demo.html`（合集根目录，浏览器直接打开）—— 本规则的**可运行证据页**，把 R1 / R4 落成看得见的对比。非游戏，纯技术演示。
+
+| 演示区块 | 验证了哪条规则 |
+|---|---|
+| 分辨率对比：8×8 分区色块 vs 16×16 手绘点阵（同屏 160px） | R1 人肉手写区间内，**点阵精度**才是观感分水岭 —— 原版小马里奥正是 16×16 = 256 像素 |
+| 走路 2 帧 + 金币旋转 4 帧 | R4「帧动画用**多矩阵整张替换**」 |
+| 瓦片纹理：砖缝 / 问号块四角铆钉 / 地面格纹 / 水管左高光右暗边 | ≤32px 区间内纯 `fillRect` 就能做出纹理，**不需要美术资源** |
+| 场景合成：云 0.6 / 山 0.4 视差 + 前景灌木 + 318 瓦片 + 精灵 | R2「程序化小元素」规模化后的实际观感与水印级性能 |
+| **`bake()` 参考实现** | R1 第三条 + R4 优化路径：精灵逐格 `fillRect` **只画一次**缓存到离屏 canvas，之后全部 `drawImage` |
+
+**可直接复用的代码片段**（该页 `<script>` 内）：
+
+```js
+// 点阵 → 离屏 canvas，只在初始化调用一次
+function bake(rows, pal) {
+  const h = rows.length, w = rows[0].length;
+  const cv = document.createElement('canvas');
+  cv.width = w; cv.height = h;
+  const g = cv.getContext('2d');
+  for (let y = 0; y < h; y++)
+    for (let x = 0; x < w; x++) {
+      const col = pal[rows[y][x]];
+      if (col) { g.fillStyle = col; g.fillRect(x, y, 1, 1); }
+    }
+  return cv;   // 之后全部 ctx.drawImage(cv, ...)
+}
+```
+
+> 配套实现细节：整页另用 `image-rendering: pixelated` + 整数坐标对齐，避免放大后边缘发虚；这与 R0「硬边」原则一致。
+

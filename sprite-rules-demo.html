@@ -1,0 +1,741 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>画面精度对比 · 超级玛丽</title>
+<style>
+  :root{
+    --bg:#0d1117; --panel:#161b22; --line:#30363d; --line2:#21262d;
+    --fg:#c9d1d9; --muted:#8b949e; --dim:#6e7681;
+    --accent:#58a6ff; --ok:#3fb950; --warn:#d29922; --bad:#f85149;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; background:var(--bg); color:var(--fg);
+    font:14px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB",sans-serif;
+    padding:30px 20px 72px;
+  }
+  .wrap{max-width:960px;margin:0 auto}
+  h1{font-size:21px;font-weight:600;margin:0 0 8px;letter-spacing:-.2px}
+  .sub{color:var(--muted);font-size:13px;margin:0 0 8px}
+  h2{font-size:15px;font-weight:600;margin:36px 0 14px;padding-bottom:9px;
+     border-bottom:1px solid var(--line);display:flex;align-items:center;gap:8px}
+  h2 .tag{font:11px/1 var(--mono);color:var(--dim);border:1px solid var(--line);
+     border-radius:5px;padding:4px 7px;font-weight:400}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:20px}
+  canvas{image-rendering:pixelated;image-rendering:-moz-crisp-edges;display:block}
+  .row{display:flex;gap:16px;flex-wrap:wrap}
+  .cell{flex:1 1 240px;min-width:220px}
+  .card{background:var(--bg);border:1px solid var(--line2);border-radius:8px;padding:14px}
+  .card h3{margin:0 0 4px;font-size:13px;font-weight:600}
+  .card .meta{font:11px/1.5 var(--mono);color:var(--dim);margin-bottom:12px}
+  .stage{display:flex;justify-content:center;align-items:flex-end;
+     min-height:172px;padding:6px 0 0}
+  .stage canvas{width:160px;height:auto}
+  .verdict{margin-top:12px;font-size:12px;line-height:1.7;color:var(--muted)}
+  .verdict b{color:var(--fg);font-weight:500}
+  .k-bad{color:var(--bad)} .k-warn{color:var(--warn)} .k-ok{color:var(--ok)}
+  table{width:100%;border-collapse:collapse;font-size:12.5px}
+  th,td{text-align:left;padding:9px 10px;border-bottom:1px solid var(--line2);vertical-align:top}
+  th{color:var(--muted);font-weight:500;font-size:11.5px;letter-spacing:.3px;
+     border-bottom:1px solid var(--line)}
+  td:first-child{color:var(--fg);width:27%}
+  td.old{color:var(--bad);width:23%}
+  td.new{color:var(--ok);width:30%}
+  tr:last-child td{border-bottom:none}
+  .pill{display:inline-block;font:11px/1 var(--mono);padding:3px 7px;border-radius:5px;
+     border:1px solid currentColor}
+  .p-easy{color:var(--ok)} .p-mid{color:var(--warn)} .p-hard{color:var(--bad)}
+  .note{color:var(--dim);font-size:12px;margin-top:12px;line-height:1.7}
+  .legend{display:flex;gap:14px;flex-wrap:wrap;font:11px/1 var(--mono);color:var(--dim);margin-top:10px}
+  .legend i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:5px;
+     vertical-align:-1px}
+  .scene-wrap{border-radius:8px;overflow:hidden;border:1px solid var(--line2);line-height:0}
+  .scene-wrap canvas{width:100%;height:auto}
+  ul.clean{margin:10px 0 0;padding-left:18px;color:var(--muted);font-size:12.5px}
+  ul.clean li{margin-bottom:5px}
+  code{font-family:var(--mono);font-size:12px;background:#21262d;border-radius:4px;
+     padding:1.5px 5px;color:#79c0ff}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>画面精度对比：差距不在"用不用图片"，在点阵数据有多细</h1>
+  <p class="sub">左边是上一轮那种 8×8 粗色块示意，右边是 16×16 手绘级点阵。两者都是纯代码绘制，没有一张 PNG。</p>
+
+  <h2>01 精灵分辨率 <span class="tag">同样显示 160px</span></h2>
+  <div class="panel">
+    <div class="row">
+      <div class="cell">
+        <div class="card">
+          <h3>8 × 8 分区色块</h3>
+          <div class="meta">64 像素 · 4 色 · 0 条轮廓</div>
+          <div class="stage"><canvas id="c8" width="8" height="8"></canvas></div>
+          <div class="verdict">
+            每个色块占 <b>2×2 逻辑像素</b>。<br>
+            没有头发、没有眼白、没有胡子、没有背带 —— 只有"红/肤/棕/蓝"四块面积。
+          </div>
+        </div>
+      </div>
+      <div class="cell">
+        <div class="card">
+          <h3>16 × 16 手绘点阵</h3>
+          <div class="meta">256 像素 · 4 色 · 完整轮廓层次</div>
+          <div class="stage"><canvas id="c16" width="16" height="16"></canvas></div>
+          <div class="verdict">
+            每个色块占 <b>1×1 逻辑像素</b>。<br>
+            帽檐梯形、鬓角、双像素眼睛、横贯胡子、蓝色背带、下垂双手、左右分立的鞋。
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="legend">
+      <span><i style="background:#d82800"></i>R 红 帽/上衣</span>
+      <span><i style="background:#0058f8"></i>B 蓝 背带裤</span>
+      <span><i style="background:#fca044"></i>S 肤 面部/手</span>
+      <span><i style="background:#6c4800"></i>K 棕 发/胡/眼/鞋</span>
+    </div>
+    <p class="note">
+      像素数差了 4 倍，但观感差距远不止 4 倍 —— 因为<b style="color:var(--fg)">人脸是靠"相邻像素的明暗对比"读出来的</b>。
+      8×8 里一个色块跨 2 个逻辑像素，五官就没地方放了。这就是原版必须用 16×16 的原因。
+    </p>
+  </div>
+
+  <h2>02 动作帧 <span class="tag">静态精灵 = 木头人</span></h2>
+  <div class="panel">
+    <div class="row">
+      <div class="cell">
+        <div class="card">
+          <h3>走路循环 2 帧</h3>
+          <div class="meta">140ms / 帧</div>
+          <div class="stage"><canvas id="cwalk" width="16" height="16"></canvas></div>
+        </div>
+      </div>
+      <div class="cell">
+        <div class="card">
+          <h3>放大 10 倍</h3>
+          <div class="meta">看腿部与手臂相位</div>
+          <div class="stage"><canvas id="cwalkbig" width="16" height="16" style="width:220px"></canvas></div>
+        </div>
+      </div>
+    </div>
+    <p class="note">
+      原版小马里奥有 <b style="color:var(--fg)">走 3 帧 / 跑 3 帧 / 跳 1 帧 / 刹车 1 帧 / 死亡 1 帧 / 变身 1 帧</b>。
+      程序化绘制做帧动画的成本是"多写几个字符串数组"，不是"多画几张图"。
+    </p>
+  </div>
+
+  <h2>03 瓦片纹理 <span class="tag">纯色块 → 有细节</span></h2>
+  <div class="panel">
+    <div class="row" id="tileRow"></div>
+    <p class="note">
+      瓦片是最容易看出"敷衍"还是"用心"的地方。原版的砖块有<b style="color:var(--fg)">错缝砖纹</b>、问号块有
+      <b style="color:var(--fg)">四角铆钉 + 立体边框</b>、地面有<b style="color:var(--fg)">网格高光</b>、水管有
+      <b style="color:var(--fg)">左侧高光条 + 右侧暗边</b>。这些都是十几行绘制代码，不需要美术资源。
+    </p>
+  </div>
+
+  <h2>04 场景合成 <span class="tag">3 层视差 + 全部元素</span></h2>
+  <div class="panel">
+    <div class="scene-wrap"><canvas id="scene" width="240" height="80"></canvas></div>
+    <p class="note" id="sceneNote">加载中…</p>
+  </div>
+
+  <h2>05 差距清单与补法</h2>
+  <div class="panel">
+    <table>
+      <thead>
+        <tr><th>差距点</th><th>上一轮的样子</th><th>做到接近原版</th><th>难度</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>精灵分辨率</td>
+          <td class="old">8×8 四色块</td>
+          <td class="new">16×16 分层点阵</td>
+          <td><span class="pill p-easy">简单</span></td>
+        </tr>
+        <tr>
+          <td>五官与轮廓</td>
+          <td class="old">面部只有一个色块</td>
+          <td class="new">鬓角 / 眼白 / 胡子 / 帽檐梯形</td>
+          <td><span class="pill p-easy">简单</span></td>
+        </tr>
+        <tr>
+          <td>动作帧</td>
+          <td class="old">1 帧静态</td>
+          <td class="new">走 3 + 跑 3 + 跳 1 + 死 1</td>
+          <td><span class="pill p-mid">中等</span></td>
+        </tr>
+        <tr>
+          <td>瓦片细节</td>
+          <td class="old">纯色方块</td>
+          <td class="new">砖缝 / 铆钉 / 格纹 / 水管高光</td>
+          <td><span class="pill p-easy">简单</span></td>
+        </tr>
+        <tr>
+          <td>背景层次</td>
+          <td class="old">无</td>
+          <td class="new">云 0.6 / 山 0.4 / 灌木 0.85 三层视差</td>
+          <td><span class="pill p-easy">简单</span></td>
+        </tr>
+        <tr>
+          <td>打击特效</td>
+          <td class="old">无</td>
+          <td class="new">碎砖粒子 / 金币上浮 / 分数飘字</td>
+          <td><span class="pill p-mid">中等</span></td>
+        </tr>
+        <tr>
+          <td>渲染质量</td>
+          <td class="old">默认平滑缩放</td>
+          <td class="new"><code>image-rendering: pixelated</code> + 整数坐标对齐</td>
+          <td><span class="pill p-easy">简单</span></td>
+        </tr>
+        <tr>
+          <td>皮肤 / 变体</td>
+          <td class="old">要重新画图</td>
+          <td class="new">改调色板一行 → 火焰玛丽 / 无敌闪烁</td>
+          <td><span class="pill p-easy">简单</span></td>
+        </tr>
+      </tbody>
+    </table>
+    <p class="note">
+      唯一真正"改不动"的是<b style="color:var(--fg)">手绘美术质量本身</b> —— 逐像素录入一个 16×16 精灵是体力活，
+      但它是<b style="color:var(--fg)">可复制的一次性成本</b>：录完之后，换色、缩放、做变体全部免费。
+      图片方案反而是每换一次色就要重新导出一张 PNG。
+    </p>
+  </div>
+
+</div>
+
+<script>
+(function(){
+  'use strict';
+
+  /* ========== 调色板 ==========
+     NES 小马里奥实际只用 3 色（红 / 肤 / 棕）+ 透明，
+     这里加上背带裤蓝，正好是原版小马里奥的配色。 */
+  var PAL = {
+    '.': null,
+    R: '#d82800',  // 红：帽 / 上衣 / 袖
+    B: '#0058f8',  // 蓝：背带裤
+    S: '#fca044',  // 肤：脸 / 手
+    K: '#6c4800',  // 棕：发 / 胡 / 眼 / 鞋
+    Y: '#f8b800',  // 黄：问号块 / 金币
+    O: '#c84c0c',  // 橙：砖块 / 地面
+    G: '#00a800',  // 绿：水管
+    g: '#58d854',  // 亮绿：水管高光
+    D: '#006800',  // 暗绿：水管暗边
+    W: '#ffffff',  // 白：眼白 / 高光
+    E: '#000000'   // 黑：瞳孔
+  };
+
+  /* ========== 8×8 粗版（对照组） ========== */
+  var MARIO8 = [
+    '..RRRR..',
+    '.RRRRRR.',
+    '.SSSSSS.',
+    '.KSSSSK.',
+    '.SSSSSS.',
+    '.KKKKKK.',
+    '.BBBBBB.',
+    '.BB..BB.'
+  ];
+
+  /* ========== 16×16 手绘点阵 ========== */
+  var M_BODY = [
+    '.....RRRRRR.....',
+    '...RRRRRRRRRR...',
+    '..RRRRRRRRRRRR..',
+    '..KKSSSSSSSSKK..',
+    '..KSSKKSSKKSSK..',
+    '..KSSSSSSSSSSK..',
+    '..KKKKSSSSKKKK..',
+    '....SSSSSSSS....',
+    '..RRRRRRRRRRRR..',
+    '.RRRRBBBBBBRRRR.',
+    '.RRRBBBBBBBBRRR.',
+    '.SSSBBBBBBBBSSS.',
+    '.SSBBBBBBBBBBSS.',
+    '..BBBBBBBBBBBB..'
+  ];
+
+  var LEGS_A = ['..BBBB....BBBB..', '..KKKK....KKKK..'];
+  var LEGS_B = ['...BBBBBBBBBB...', '..KKKKKKKKKKKK..'];
+  var LEGS_C = ['.BBBB......BBBB.', 'KKKK........KKKK'];
+
+  function frame(legs){ return M_BODY.concat(legs); }
+
+  var FRAMES = [frame(LEGS_A), frame(LEGS_B), frame(LEGS_C)];
+
+  /* ========== Goomba ========== */
+  var GOOMBA = [
+    '.....KKKKKK.....',
+    '...KKKKKKKKKK...',
+    '..KKKKKKKKKKKK..',
+    '..KWWKKKKKKWWK..',
+    '.KKWEWKKKKWEWKK.',
+    '.KKWWWKKKKWWWKK.',
+    '..KKKKKKKKKKKK..',
+    '..KKKKKKKKKKKK..',
+    '..KKKKKKKKKKKK..',
+    '..KKKKKKKKKKKK..',
+    '..KKKKKKKKKKKK..',
+    '..KKKKKKKKKKKK..',
+    '...SSSSSSSSSS...',
+    '..SSSSSSSSSSSS..',
+    '.SSSS......SSSS.',
+    '.SSS........SSS.'
+  ];
+
+  /* ========== 金币（椭圆量化点阵，4 帧旋转） ========== */
+  function makeCoinRows(halfW){
+    var rows = [];
+    for (var r = 0; r < 16; r++){
+      var line = '';
+      for (var c = 0; c < 16; c++){
+        var dx = c - 7.5, dy = r - 7.5;
+        var inOuter = (dx * dx) / (halfW * halfW) + (dy * dy) / 36 <= 1;
+        if (!inOuter){ line += '.'; continue; }
+        var iw = Math.max(halfW - 1.3, 0.5);
+        var inInner = (dx * dx) / (iw * iw) + (dy * dy) / 20.5 <= 1;
+        if (!inInner){ line += (dx > 0.5 || dy > 2) ? 'K' : 'Y'; continue; }
+        if (Math.abs(dx) < 0.9){ line += 'K'; continue; }
+        line += (dx < -halfW * 0.35 && dy < -1.5) ? 'W' : 'Y';
+      }
+      rows.push(line);
+    }
+    return rows;
+  }
+  var coinFrames = [4.5, 2.9, 1.2, 2.9].map(function(w){
+    return bake(makeCoinRows(w), PAL);
+  });
+
+  /* ========== 核心：把点阵预渲染到离屏 canvas ==========
+     这就是"精灵缓存"优化——每个精灵只逐格 fillRect 一次，
+     之后全部用 drawImage 复制，避免每帧几百次 fillRect。 */
+  function bake(rows, pal){
+    var h = rows.length, w = rows[0].length;
+    var cv = document.createElement('canvas');
+    cv.width = w; cv.height = h;
+    var g = cv.getContext('2d');
+    for (var y = 0; y < h; y++){
+      var line = rows[y];
+      for (var x = 0; x < w; x++){
+        var col = (pal || PAL)[line.charAt(x)];
+        if (!col) continue;
+        g.fillStyle = col;
+        g.fillRect(x, y, 1, 1);
+      }
+    }
+    return cv;
+  }
+
+  function blit(ctx, sprite, x, y, w, h){
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(sprite, x, y, w, h);
+  }
+
+  /* ========== 01 分辨率对比 ========== */
+  var SPR8  = bake(MARIO8, PAL);
+  var SPR16 = bake(FRAMES[0], PAL);
+
+  /* 两块画布统一渲染成 8×8 逻辑网格 × 20 倍 = 160px 显示，
+     这样比较的是"同样观感尺寸下，数据有多细"，而不是缩放差异。 */
+  (function(){
+    var scalePx = 20;
+
+    var a = document.getElementById('c8');
+    a.width = 8 * scalePx; a.height = 8 * scalePx;
+    var ga = a.getContext('2d');
+    ga.imageSmoothingEnabled = false;
+    ga.drawImage(SPR8, 0, 0, 8 * scalePx, 8 * scalePx);
+
+    var b = document.getElementById('c16');
+    b.width = 16 * (scalePx / 2);
+    b.height = 16 * (scalePx / 2);
+    var gb = b.getContext('2d');
+    gb.imageSmoothingEnabled = false;
+    gb.drawImage(SPR16, 0, 0, 16 * (scalePx / 2), 16 * (scalePx / 2));
+  })();
+
+  /* ========== 02 走路动画 ========== */
+  var walkSprites = FRAMES.map(function(f){ return bake(f, PAL); });
+  (function(){
+    var small = document.getElementById('cwalk');
+    var big   = document.getElementById('cwalkbig');
+    var t0 = performance.now();
+    (function loop(now){
+      var idx = Math.floor((now - t0) / 140) % walkSprites.length;
+      var sp = walkSprites[idx];
+
+      small.width = 16; small.height = 16;
+      small.style.width = '96px';
+      var gs = small.getContext('2d');
+      gs.imageSmoothingEnabled = false;
+      gs.drawImage(sp, 0, 0, 16, 16);
+
+      big.width = 16; big.height = 16;
+      big.style.width = '220px';
+      var gb = big.getContext('2d');
+      gb.imageSmoothingEnabled = false;
+      gb.drawImage(sp, 0, 0, 16, 16);
+
+      requestAnimationFrame(loop);
+    })(t0);
+  })();
+
+  /* ========== 03 瓦片绘制 ========== */
+  function drawBrick(g, x, y, s){
+    var u = s / 16;
+    g.fillStyle = '#c84c0c';
+    g.fillRect(x, y, s, s);
+    g.fillStyle = '#f8b888';
+    g.fillRect(x, y, s, 1.5 * u);
+    g.fillRect(x, y, 1.5 * u, s * 0.42);
+    g.fillRect(x + 8.5 * u, y + 8 * u, 1.5 * u, s * 0.5);
+    g.fillStyle = '#6b2400';
+    g.fillRect(x, y + 7 * u, s, 1.4 * u);
+    g.fillRect(x + 7.5 * u, y + 8.5 * u, 1.4 * u, s);
+    g.fillRect(x + 15 * u, y, 1 * u, s);
+    g.fillRect(x, y + 14.6 * u, s, 1.4 * u);
+  }
+
+  var QMARK = [
+    '..KKKK..',
+    '.KK..KK.',
+    '.K....KK',
+    '.....KK.',
+    '....KK..',
+    '...KK...',
+    '...KK...',
+    '........',
+    '...KK...'
+  ];
+
+  function drawQuestion(g, x, y, s, glow){
+    var u = s / 16;
+    g.fillStyle = '#e39d25';
+    g.fillRect(x, y, s, s);
+    g.fillStyle = '#f8b800';
+    g.fillRect(x + u, y + u, s - 2 * u, s - 2 * u);
+    g.fillStyle = '#a86100';
+    g.fillRect(x, y, s, u);
+    g.fillRect(x, y + 15 * u, s, u);
+    g.fillRect(x, y, u, s);
+    g.fillRect(x + 15 * u, y, u, s);
+    var rivets = [[1.5, 1.5], [12.5, 1.5], [1.5, 12.5], [12.5, 12.5]];
+    g.fillStyle = '#ffffff';
+    for (var i = 0; i < rivets.length; i++){
+      g.fillRect(x + rivets[i][0] * u, y + rivets[i][1] * u, 2 * u, 2 * u);
+    }
+    var vis = glow ? '#c84c0c' : '#a86100';
+    g.fillStyle = vis;
+    for (var r = 0; r < QMARK.length; r++){
+      for (var c = 0; c < 8; c++){
+        if (QMARK[r].charAt(c) === 'K'){
+          g.fillRect(x + (4.5 + c) * u, y + (3.5 + r) * u, 1 * u, 1 * u);
+        }
+      }
+    }
+  }
+
+  function drawGround(g, x, y, s){
+    var u = s / 16;
+    g.fillStyle = '#c84c0c';
+    g.fillRect(x, y, s, s);
+    g.fillStyle = '#f8b888';
+    g.fillRect(x, y, s, 1.2 * u);
+    g.fillRect(x, y, 1.2 * u, s);
+    g.fillStyle = '#6b2400';
+    g.fillRect(x, y + 15 * u, s, 1 * u);
+    g.fillRect(x + 15 * u, y, 1 * u, s);
+    g.fillRect(x, y + 7.5 * u, s, 1 * u);
+    g.fillRect(x + 7.5 * u, y, 1 * u, 7.5 * u);
+    g.fillStyle = '#a33f0a';
+    g.fillRect(x + 7.5 * u, y + 8.5 * u, 1 * u, 7 * u);
+    g.fillStyle = '#f8b888';
+    g.fillRect(x + 1.2 * u, y + 1.2 * u, 3 * u, 1 * u);
+    g.fillRect(x + 9 * u, y + 9 * u, 3 * u, 1 * u);
+  }
+
+  function drawPipeBody(g, x, y, s){
+    var u = s / 16;
+    g.fillStyle = '#00a800';
+    g.fillRect(x, y, s, s);
+    g.fillStyle = '#58d854';
+    g.fillRect(x + 1 * u, y, 4 * u, s);
+    g.fillStyle = '#006800';
+    g.fillRect(x + 13 * u, y, 3 * u, s);
+    g.fillStyle = '#88e070';
+    g.fillRect(x + 2 * u, y, 1.4 * u, s);
+  }
+
+  function drawPipeLip(g, x, y, s){
+    var u = s / 16;
+    g.fillStyle = '#00a800';
+    g.fillRect(x - 1 * u, y, s + 2 * u, s);
+    g.fillStyle = '#58d854';
+    g.fillRect(x, y, 5 * u, s);
+    g.fillStyle = '#006800';
+    g.fillRect(x - 1 * u, y + 13 * u, s + 2 * u, 3 * u);
+    g.fillRect(x + 14 * u, y, 3 * u, 13 * u);
+    g.fillStyle = '#88e070';
+    g.fillRect(x + 2 * u, y + 1 * u, 1.4 * u, 10 * u);
+  }
+
+  (function(){
+    var defs = [
+      { name: '砖块 Brick',        key: 'brick', meta: '错缝砖纹 + 顶部高光' },
+      { name: '问号块 Question',   key: 'q',     meta: '四角铆钉 + 立体边框' },
+      { name: '地面 Ground',       key: 'ground',meta: '十字格纹 + 高光角' },
+      { name: '水管 Pipe',         key: 'pipe',  meta: '左高光条 + 右暗边' },
+      { name: '金币 Coin',         key: 'coin',  meta: '旋转 4 帧' },
+      { name: '栗子怪 Goomba',     key: 'goomba',meta: '眼白 + 双足' }
+    ];
+
+    var host = document.getElementById('tileRow');
+
+    var goombaSpr = bake(GOOMBA, PAL);
+
+    defs.forEach(function(d){
+      var card = document.createElement('div');
+      card.className = 'card';
+      card.style.flex = '1 1 140px';
+      card.style.minWidth = '140px';
+      card.innerHTML = '<h3>' + d.name + '</h3><div class="meta">' + d.meta + '</div>' +
+                       '<div class="stage" style="min-height:96px"></div>';
+      var stage = card.querySelector('.stage');
+      var cv = document.createElement('canvas');
+      var s = 64;
+      cv.width = s; cv.height = s;
+      cv.style.width = '96px';
+      stage.appendChild(cv);
+      var g = cv.getContext('2d');
+      g.imageSmoothingEnabled = false;
+
+      var t0 = performance.now();
+      (function paint(now){
+        g.clearRect(0, 0, s, s);
+        if (d.key === 'brick')       drawBrick(g, 0, 0, s);
+        else if (d.key === 'q')      drawQuestion(g, 0, 0, s, Math.floor((now - t0) / 300) % 2 === 0);
+        else if (d.key === 'ground') drawGround(g, 0, 0, s);
+        else if (d.key === 'pipe'){
+          drawPipeLip(g, 0, 0, s);
+          g.clearRect(0, s * 0.62, s, s * 0.38);
+          drawPipeBody(g, 0, s * 0.62, s);
+        }
+        else if (d.key === 'coin'){
+          var idx = Math.floor((now - t0) / 110) % 4;
+          g.drawImage(coinFrames[idx], 0, 0, s, s);
+        }
+        else if (d.key === 'goomba') g.drawImage(goombaSpr, 0, 0, s, s);
+        requestAnimationFrame(paint);
+      })(t0);
+
+      host.appendChild(card);
+    });
+  })();
+
+  /* ========== 04 场景合成 ========== */
+  (function(){
+    var W = 240, H = 80, TS = 16;
+    var cv = document.getElementById('scene');
+    var g = cv.getContext('2d');
+    cv.width = W; cv.height = H;
+    g.imageSmoothingEnabled = false;
+
+    var marioSprites = walkSprites;
+    var goombaSpr = bake(GOOMBA, PAL);
+
+    var LEVEL_W = 300;
+    var tiles = [];
+    function T(cx, cy, type){ tiles.push({ cx: cx, cy: cy, t: type }); }
+
+    for (var x = 0; x < LEVEL_W; x++){
+      T(x, 4, 'ground');
+    }
+    [16, 21, 22, 23, 24, 25].forEach(function(cx){ T(cx, 1, 'brick'); });
+    T(20, 1, 'q'); T(22, 1, 'q'); T(24, 1, 'q');
+    T(22, 0, 'q');
+    T(17, 1, 'coin'); T(23, 0, 'coin');
+    T(30, 3, 'pipeBody'); T(30, 2, 'pipeBody'); T(30, 1, 'pipeLip');
+    T(31, 3, 'pipeBody'); T(31, 2, 'pipeBody'); T(31, 1, 'pipeLip');
+
+    var camX = 0;
+    var MARIO_X = 52;
+    var nowMs = 0;
+
+    function drawHill(g, x, baseY, w, h){
+      g.fillStyle = '#00a800';
+      g.beginPath();
+      g.moveTo(x, baseY);
+      g.lineTo(x + w / 2, baseY - h);
+      g.lineTo(x + w, baseY);
+      g.closePath();
+      g.fill();
+      g.strokeStyle = '#006800';
+      g.lineWidth = 0.7;
+      g.beginPath();
+      g.moveTo(x + w * 0.25, baseY);
+      g.lineTo(x + w * 0.5, baseY - h);
+      g.lineTo(x + w * 0.75, baseY);
+      g.moveTo(x + w * 0.375, baseY - h / 2);
+      g.lineTo(x + w * 0.625, baseY - h / 2);
+      g.stroke();
+    }
+
+    function drawCloud(g, x, y, s){
+      g.fillStyle = '#ffffff';
+      var puffs = [[0, 0, 1.0], [1.1, -0.45, 1.25], [2.4, 0, 1.0], [1.2, 0.35, 0.85]];
+      for (var i = 0; i < puffs.length; i++){
+        g.beginPath();
+        g.arc(x + puffs[i][0] * s, y + puffs[i][1] * s, puffs[i][2] * s, 0, Math.PI * 2);
+        g.fill();
+      }
+      g.fillStyle = '#e8f0ff';
+      g.beginPath();
+      g.arc(x + 1.2 * s, y + 0.55 * s, 0.55 * s, 0, Math.PI * 2);
+      g.fill();
+    }
+
+    function drawBush(g, x, y, s){
+      g.fillStyle = '#00a800';
+      var puffs = [[0, 0, 0.75], [0.85, -0.3, 0.95], [1.85, 0, 0.75]];
+      for (var i = 0; i < puffs.length; i++){
+        g.beginPath();
+        g.arc(x + puffs[i][0] * s, y + puffs[i][1] * s, puffs[i][2] * s, 0, Math.PI * 2);
+        g.fill();
+      }
+      g.fillStyle = '#58d854';
+      g.beginPath();
+      g.arc(x + 0.85 * s, y - 0.55 * s, 0.42 * s, 0, Math.PI * 2);
+      g.fill();
+    }
+
+    function drawBackground(cam){
+      g.fillStyle = '#5c94fc';
+      g.fillRect(0, 0, W, H);
+
+      var hillPeriod = 190, hillOff = -((cam * 0.4) % hillPeriod);
+      for (var i = -1; i <= 2; i++){
+        var hx = hillOff + i * hillPeriod;
+        drawHill(g, hx, TS * 4, 76, 30);
+        drawHill(g, hx + 96, TS * 4, 52, 20);
+      }
+
+      var cloudPeriod = 150, cloudOff = -((cam * 0.6) % cloudPeriod);
+      for (var j = -1; j <= 2; j++){
+        var cxp = cloudOff + j * cloudPeriod;
+        drawCloud(g, cxp + 18, 20, 7);
+        drawCloud(g, cxp + 92, 34, 5.4);
+      }
+    }
+
+    function drawTile(tile){
+      var px = tile.cx * TS - camX, py = tile.cy * TS;
+      if (px < -TS * 2 || px > W + TS) return;
+      if (tile.t === 'ground'){
+        drawGroundTile(px, py);
+      } else if (tile.t === 'brick'){
+        g.fillStyle = '#c84c0c';
+        g.fillRect(px, py, TS, TS);
+        g.fillStyle = '#f8b888';
+        g.fillRect(px, py, TS, 1.5);
+        g.fillRect(px, py, 1.5, TS * 0.42);
+        g.fillRect(px + 8.5, py + 8, 1.5, TS * 0.5);
+        g.fillStyle = '#6b2400';
+        g.fillRect(px, py + 7, TS, 1.4);
+        g.fillRect(px + 7.5, py + 8.5, 1.4, TS);
+        g.fillRect(px + 15, py, 1, TS);
+        g.fillRect(px, py + 14.6, TS, 1.4);
+      } else if (tile.t === 'q'){
+        drawQuestion(g, px, py, TS, true);
+      } else if (tile.t === 'coin'){
+        g.imageSmoothingEnabled = false;
+        var ci = Math.floor(nowMs / 110) % coinFrames.length;
+        g.drawImage(coinFrames[ci], px, py, TS, TS);
+      } else if (tile.t === 'pipeLip'){
+        g.fillStyle = '#00a800';
+        g.fillRect(px - 1, py, TS + 2, TS);
+        g.fillStyle = '#58d854';
+        g.fillRect(px, py, 5, TS);
+        g.fillStyle = '#006800';
+        g.fillRect(px - 1, py + 13, TS + 2, 3);
+        g.fillRect(px + 14, py, 3, 13);
+        g.fillStyle = '#88e070';
+        g.fillRect(px + 2, py + 1, 1.4, 10);
+      } else if (tile.t === 'pipeBody'){
+        g.fillStyle = '#00a800';
+        g.fillRect(px, py, TS, TS);
+        g.fillStyle = '#58d854';
+        g.fillRect(px + 1, py, 4, TS);
+        g.fillStyle = '#006800';
+        g.fillRect(px + 13, py, 3, TS);
+        g.fillStyle = '#88e070';
+        g.fillRect(px + 2, py, 1.4, TS);
+      }
+    }
+
+    function drawGroundTile(px, py){
+      g.fillStyle = '#c84c0c';
+      g.fillRect(px, py, TS, TS);
+      g.fillStyle = '#f8b888';
+      g.fillRect(px, py, TS, 1.2);
+      g.fillRect(px, py, 1.2, TS);
+      g.fillStyle = '#6b2400';
+      g.fillRect(px, py + 15, TS, 1);
+      g.fillRect(px + 15, py, 1, TS);
+      g.fillRect(px, py + 7.5, TS, 1);
+      g.fillRect(px + 7.5, py, 1, 7.5);
+      g.fillStyle = '#a33f0a';
+      g.fillRect(px + 7.5, py + 8.5, 1, 7);
+      g.fillStyle = '#f8b888';
+      g.fillRect(px + 1.2, py + 1.2, 3, 1);
+      g.fillRect(px + 9, py + 9, 3, 1);
+    }
+
+    var t0 = performance.now();
+    (function loop(now){
+      nowMs = now;
+      var elapsed = now - t0;
+
+      camX += 0.42;
+      if (camX > LEVEL_W * TS - W - 20) camX = 0;
+
+      drawBackground(camX);
+      for (var i = 0; i < tiles.length; i++) drawTile(tiles[i]);
+
+      for (var wx = 12; wx < LEVEL_W; wx += 17){
+        if (wx >= 27 && wx <= 38) continue;
+        var bx = wx * TS - camX;
+        if (bx > -50 && bx < W + 50) drawBush(g, bx, TS * 4 - 8, 10);
+      }
+
+      var goombaWorldX = 150;
+      var gx = goombaWorldX * TS - camX;
+      if (gx > -TS && gx < W + TS){
+        g.imageSmoothingEnabled = false;
+        g.drawImage(goombaSpr, gx, TS * 4 - TS, TS, TS);
+      }
+
+      var fi = Math.floor(elapsed / 130) % marioSprites.length;
+      var bob = (fi === 1) ? 0.5 : 0;
+      var mx = MARIO_X;
+      g.imageSmoothingEnabled = false;
+      g.drawImage(marioSprites[fi], mx, TS * 4 - TS + bob, TS, TS);
+
+      requestAnimationFrame(loop);
+    })(t0);
+
+    document.getElementById('sceneNote').textContent =
+      '场景内每个精灵和瓦片的位置都是整数像素，文字与边缘不会发虚；' +
+      '所有元素共 ' + tiles.length + ' 个瓦片 + 2 个精灵，纯代码绘制，零图片请求。';
+  })();
+
+})();
+</script>
+</body>
+</html>

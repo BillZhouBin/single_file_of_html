@@ -202,6 +202,7 @@ single_file_of_html/
 ## 共享资源
 
 - **`sprite-rules.md`（位于合集根目录）** —— 像素精灵技术选型规则（尺寸红线 / 场景矩阵 / 硬性排除 / 性能红线 / 决策树）。它是**跨游戏通用**的，已上提到根目录做共享，所有 game 直接引用、避免重复维护。设计中以文件名引用即可，无需写相对路径。
+- **`sprite-rules-demo.html`（位于合集根目录）** —— `sprite-rules.md` 的**可运行证据页**（非游戏，纯技术演示）。并排对比「8×8 分区色块」与「16×16 手绘点阵」，演示瓦片纹理（砖缝 / 问号块铆钉 / 地面格纹 / 水管高光）、整张替换式帧动画（走路 2 帧 + 金币旋转 4 帧）、3 层视差场景合成（318 瓦片 + 精灵，零图片请求）。**它就是 R1 第三条「预渲染 bake + drawImage」的参考实现** —— 每个精灵只在初始化逐格 `fillRect` 一次并缓存到离屏 canvas，之后全部走 `drawImage`，可直接复制到新游戏里。
 - **`shared.js`（位于合集根目录）** —— 跨游戏运行时共享模块（`window.SharedGame`）。所有 `.game.html` 在最顶部插入 `<script src="../shared.js"></script>`（`index.html` 用 `./shared.js`）。暴露三大工具：
   - `SharedGame.Store` — `getJSON/setJSON/del/get/set` 容错包装，替代裸 `localStorage` 调用，**与 `mm_result/mm_run/mm_pending` 等跨游戏键完全兼容**。
   - `SharedGame.Audio` — 全局 `AudioContext` 单例懒加载（旧手机不再被 6 个独立 AC 拖累）；每个游戏的 `ensureAudio` / `ac()` 委托给它，本地的 tone/noise/SFX 字典与 BGM 编排保持原状（音色设计归各游戏）。
