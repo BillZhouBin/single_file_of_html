@@ -1,0 +1,2343 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#4FC6F0">
+<title>零食大冒险 · Snack Adventure</title>
+<meta name="description" content="竖屏三车道零食跑酷（微信小游戏《9月零食金币狂飙赛》逐像素逆向复刻）：左右换道躲雪糕筒、狂吃金币、捡油桶进入 3 秒双倍速，60 秒限时挑战最高分。键盘 + 触摸双输入。">
+<style>
+  *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;
+    -webkit-user-select:none;user-select:none;}
+  html,body{width:100%;height:100%;overflow:hidden;background:#1b2430;touch-action:none;}
+  #wrap{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;
+        background:#1b2430;}
+  #cv{display:block;touch-action:none;}
+</style>
+</head>
+<body>
+<div id="wrap"><canvas id="cv"></canvas></div>
+<!-- 合集共享模块（localStorage 封装 / Web Audio 单例 / 输入原语）。
+     离线或单独拷贝本文件时自动降级到本地实现，不影响游玩。 -->
+<script src="../shared.js"></script>
+<script>
+'use strict';
+/* ==========================================================================
+   《零食大冒险》  —  竖屏三车道零食跑酷
+   单文件 / 无外部依赖 / 全程序化矢量绘制 + WebAudio 合成音效
+   全部尺寸依据参考截图逐像素测量得出（详见下方"实测标定"注释）
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   1. 画布与实测标定参数
+   -------------------------------------------------------------------------- */
+const W = 640, H = 1287;              // 逻辑分辨率（参考图内容区 640 x 1287，实测）
+// 路面几何（对 key_005.jpg 逐行最小二乘拟合，内容坐标系 = 全图 y − 113）：
+//   路面半宽  = 0.5875 * (y - 296)    ← 10 行采样拟合，残差 < 2px
+//   车道分隔线 = 0.1725 * (y - 285)    ← 6 行采样拟合，残差 < 2px
+const Y_VP    = 296;                  // 路面消失点 y（路面/车道线共同外推点）
+const ROAD_CX = 319;                  // 路面中心线 x（实测 311~319.5，取 319）
+const ROAD_K  = 0.5875;               // 路面半宽 = ROAD_K * (y - Y_VP)
+const GRASS_TOP = 415;                // 草地（地平线）上边缘 y（实测）
+
+// 透视：z 为世界深度，y = Y_VP + C_Z / z；玩家位于 z = Z_P
+// C_Z 由「玩家着地 y = 1058」反解：296 + C_Z/3 = 1058 → C_Z = 2286
+const C_Z = 2286, Z_P = 3, PXS = 100;
+// 车道中心（实测 t130s/t160s/t250s 三帧角色中心 = 319±218）→ 世界偏移 2.18
+const LANE_WU = 2.18;                 // 单车道中心间距（世界单位）
+// 车道分隔线：0.1725*(y-285) px ⇒ 世界偏移 = 0.1725 * C_Z/(PXS*Z_P) / 1.0116 ≈ 1.333
+const DIVIDER_WU = 1.333;             // 车道分割线相对中心的世界偏移
+const PLAYER_Y = 1058;                // 角色轮胎着地 y
+
+const Z_FAR = 18.5, Z_NEAR = 2.28;    // 生成 / 回收深度（对应 y≈420 / y≈1299）
+
+/* ---- 数值参数 ----------------------------------------------------------
+   【待确认】= 参考图中没有可直接读取的数值，由相邻帧差分反推或采用合理默认值。
+   已由参考图确认的项不带标记（如 3S 加速、60 秒单局）。 */
+const ROUND_TIME = 60;                // 单局时长 60 秒（实测倒计时 01:00 → 00:00）
+const COIN_SCORE = 20;                // 单枚金币分值 【待确认】由 0→270 分 / ~12 秒实数反推
+const BOOST_TIME = 3.0;               // 油桶加速时长 3 秒（参考图明确标注 "3S内分数翻倍"）
+const BOOST_MUL  = 2;                 // 加速期分数倍率 2x（参考图明确标注）
+const START_SPEED = 5.6;              // 初始推进速度（世界单位/秒）【待确认】
+const SPEED_GAIN  = 0.055;            // 每秒加速量【待确认】
+/* 音效：参考图为静帧，无法提取音频 → 全部为程序合成（WebAudio），风格【待确认】 */
+
+/* 配色（参考图取色） */
+/* 配色全部取自 key_005.jpg 的像素众数（参考图为高饱和扁平风）
+   天空 #57D2FE（占 44k 像素，几乎纯色）
+   山峦 #08ACE1   树冠 #00D97A   草地 #76D34E
+   路面 #8F89A5（纯色，无渐变）  车道线 #ECE6F4 */
+const COL = {
+  skyTop:'#57D2FE', skyMid:'#57D2FE', skyLow:'#66D8FE',
+  cloud:'#FFFFFF',
+  mtnFar:'#08ACE1', mtnMid:'#079FD6', mtnNear:'#0693C9',
+  grassTop:'#76D34E', grassMid:'#76D34E', grassLow:'#71CE49',
+  grassLight:'#8CE459', grassDark:'#5FC845', grassLeaf:'#4FB93A',
+  road:'#8F89A5', roadFar:'#8F89A5', roadNear:'#8F89A5',
+  shoulder:'#CFD2E0',
+  lane:'#ECE6F4',
+  treeDark:'#0FA84E', treeMid:'#00D97A', treeLight:'#38E08C', trunk:'#A45B4A',
+  fog:'#A9DEEC',
+  coneRed:'#E93A2E', coneRedDark:'#C4291F', coneWhite:'#F7F2E6', plate:'#4E4E58',
+  coinHi:'#FFE07A', coinMid:'#FFD24A', coinRim:'#EFA417', coinDark:'#E08C0C',
+  canBlue:'#5BB8E8', canBlueDark:'#3E97C6', canLight:'#7FCCF2', capGray:'#4C4C55',
+  uiShadow:'rgba(45,45,65,0.92)'
+};
+const FONT = '"Yuanti SC","HanziPen SC","PingFang SC","Hiragino Sans GB","Microsoft YaHei",-apple-system,sans-serif';
+const FONT_H = '"PingFang SC","Hiragino Sans GB","Heiti SC","Microsoft YaHei",sans-serif';
+
+/* --------------------------------------------------------------------------
+   2. 画布初始化与自适应
+   -------------------------------------------------------------------------- */
+const cv = document.getElementById('cv');
+const ctx = cv.getContext('2d');
+const VIEW = {s:1, ox:0, oy:0, dpr:1};
+
+function resize(){
+  const ww = window.innerWidth, wh = window.innerHeight;
+  const s = Math.min(ww/W, wh/H);
+  VIEW.s = s;
+  VIEW.ox = (ww - W*s)/2;
+  VIEW.oy = (wh - H*s)/2;
+  cv.style.width  = (W*s)+'px';
+  cv.style.height = (H*s)+'px';
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  VIEW.dpr = dpr;
+  cv.width  = Math.round(W*dpr);
+  cv.height = Math.round(H*dpr);
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+}
+window.addEventListener('resize', resize);
+window.addEventListener('orientationchange', ()=>setTimeout(resize,150));
+resize();
+
+/* --------------------------------------------------------------------------
+   3. 通用工具
+   -------------------------------------------------------------------------- */
+const clamp=(v,a,b)=>v<a?a:(v>b?b:v);
+const lerp=(a,b,t)=>a+(b-a)*t;
+const rnd=(a,b)=>a+Math.random()*(b-a);
+const rndi=(a,b)=>Math.floor(a+Math.random()*(b-a+1));
+const TAU = Math.PI*2;
+
+function rr(c,x,y,w,h,r){
+  r=Math.min(r, Math.abs(w)/2, Math.abs(h)/2);
+  c.beginPath();
+  c.moveTo(x+r,y);
+  c.arcTo(x+w,y,x+w,y+h,r);
+  c.arcTo(x+w,y+h,x,y+h,r);
+  c.arcTo(x,y+h,x,y,r);
+  c.arcTo(x,y,x+w,y,r);
+  c.closePath();
+}
+function circ(c,x,y,r){ c.beginPath(); c.arc(x,y,r,0,TAU); c.closePath(); }
+function ell(c,x,y,rx,ry,rot){ c.beginPath(); c.ellipse(x,y,Math.abs(rx),Math.abs(ry),rot||0,0,TAU); c.closePath(); }
+
+/** 带描边/阴影的文字 */
+function txt(c,s,x,y,size,color,weight,opt){
+  opt = opt||{};
+  c.save();
+  c.font = (weight||'700')+' '+size+'px '+(opt.hf?FONT_H:FONT);
+  c.textAlign = opt.align||'center';
+  c.textBaseline = opt.baseline||'alphabetic';
+  c.lineJoin='round'; c.lineCap='round';
+  if(opt.shadow){
+    c.shadowColor = opt.shadow; c.shadowBlur = opt.shadowBlur||0;
+    c.shadowOffsetY = opt.shadowY||3;
+  }
+  if(opt.stroke){
+    c.lineWidth = opt.sw||Math.max(3,size*0.16);
+    c.strokeStyle = opt.stroke;
+    c.strokeText(s,x,y);
+  }
+  if(opt.grad){
+    const g = c.createLinearGradient(0,y-size*0.85,0,y+size*0.2);
+    opt.grad.forEach((st,i)=>g.addColorStop(i/(opt.grad.length-1), st));
+    c.fillStyle = g;
+  } else c.fillStyle = color;
+  c.fillText(s,x,y);
+  c.restore();
+}
+
+/** 四角星光点 */
+function sparkle(c,x,y,r,color,alpha){
+  c.save(); c.globalAlpha=(alpha===undefined?1:alpha); c.fillStyle=color||'#FFF';
+  c.beginPath();
+  c.moveTo(x,y-r); c.quadraticCurveTo(x,y,x+r,y);
+  c.quadraticCurveTo(x,y,x,y+r); c.quadraticCurveTo(x,y,x-r,y);
+  c.quadraticCurveTo(x,y,x,y-r); c.closePath(); c.fill(); c.restore();
+}
+
+/** 离屏精灵缓存 */
+function sprite(w,h,fn){
+  const cc = document.createElement('canvas');
+  cc.width = w; cc.height = h;
+  const g = cc.getContext('2d');
+  fn(g,w,h);
+  return cc;
+}
+
+/* --------------------------------------------------------------------------
+   4. 音效（WebAudio 合成，无外部资源）
+   -------------------------------------------------------------------------- */
+let AC=null, muted=false;
+// 优先复用 shared.js 的全局 AudioContext 单例：同一页面切换多个游戏时不再各开一个 AC。
+// 拿不到 SharedGame（离线单文件、或直接拷贝本文件）时，完整降级到本地实现。
+function sharedAudio(){ const S=window.SharedGame; return (S&&S.Audio)?S.Audio:null; }
+function audioInit(){
+  const S = sharedAudio();
+  if(S){ S.ensure(); if(S.ctx) AC = S.ctx; if(AC) return; }
+  if(AC) return;
+  try{
+    const Ctor = window.AudioContext||window.webkitAudioContext;
+    if(Ctor) AC = new Ctor();
+  }catch(e){ AC=null; }
+}
+function setMuted(v){
+  muted = !!v;
+  const S = sharedAudio();
+  if(S) S.setEnabled(!muted);      // 与共享模块的静音开关保持一致
+}
+function tone(freq,dur,type,vol,slideTo,delay){
+  if(muted) return;
+  // 委托给共享音频：SharedGame.Audio.tone(type, f0, f1, dur, vol, delay)
+  const S = sharedAudio();
+  if(S && S.ctx){ S.tone(type||'sine', freq, slideTo||freq, dur, vol||0.10, delay||0); return; }
+  if(!AC) return;
+  try{
+    const t0 = AC.currentTime + (delay||0);
+    const o = AC.createOscillator(), g = AC.createGain();
+    o.type = type||'sine';
+    o.frequency.setValueAtTime(freq,t0);
+    if(slideTo) o.frequency.exponentialRampToValueAtTime(Math.max(40,slideTo),t0+dur);
+    g.gain.setValueAtTime(0.0001,t0);
+    g.gain.exponentialRampToValueAtTime(vol||0.10,t0+0.012);
+    g.gain.exponentialRampToValueAtTime(0.0001,t0+dur);
+    o.connect(g); g.connect(AC.destination);
+    o.start(t0); o.stop(t0+dur+0.03);
+  }catch(e){}
+}
+const sfx = {
+  coin(){ tone(1250,0.075,'triangle',0.085,1700); tone(1900,0.05,'sine',0.04,2300,0.02); },
+  boost(){ tone(560,0.13,'square',0.075,900); tone(900,0.20,'square',0.075,1350,0.09); },
+  crash(){ tone(260,0.42,'sawtooth',0.16,50); tone(95,0.5,'square',0.11,38); },
+  click(){ tone(780,0.055,'sine',0.075,1020); },
+  over(){ tone(540,0.16,'sine',0.10,400); tone(380,0.30,'sine',0.10,220,0.15); },
+  tick(){ tone(880,0.10,'sine',0.09,880); },
+  go(){ tone(1180,0.22,'sine',0.11,1560); }
+};
+
+/* --------------------------------------------------------------------------
+   5. 透视投影
+   -------------------------------------------------------------------------- */
+const gY  = z => Y_VP + C_Z/z;          // 地面 y
+const sZ  = z => Z_P/z;                 // 缩放因子（z=Z_P 时为 1）
+const pX  = (wx,z) => ROAD_CX + wx*PXS*sZ(z);
+const laneX = lane => (lane-1)*LANE_WU;  // lane: 0 左 / 1 中 / 2 右
+/** 路面半宽（屏幕像素），与实测公式一致 */
+const halfW = y => Math.max(0, ROAD_K*(y-Y_VP));
+
+/* ==========================================================================
+   6. 精灵资源（全部程序化绘制，绘制一次后复用）
+   ========================================================================== */
+
+/* ---- 云 ---- */
+const CLOUD = [0,1,2].map(i => sprite(220,120,(g,w,h)=>{
+  const cx=w/2, cy=h*0.62, R=34+i*3;
+  g.fillStyle='#FFFFFF';
+  const blobs=[[0,0,R],[0.52,-0.18,R*0.78],[-0.5,0.05,R*0.72],[0.18,-0.5,R*0.66],[-0.2,-0.36,R*0.58]];
+  g.beginPath();
+  blobs.forEach(b=>{ g.moveTo(cx+b[0]*R+ b[2], cy+b[1]*R); g.arc(cx+b[0]*R, cy+b[1]*R, b[2], 0, TAU); });
+  g.fill();
+  // 底部略平的柔边
+  g.beginPath(); g.ellipse(cx, cy+R*0.42, R*1.5, R*0.42, 0, 0, TAU); g.fill();
+}));
+
+/* ---- 树（针叶+圆润树冠，参考图：深绿主体+浅绿高光+棕色树干）---- */
+const TREE = sprite(240,320,(g,w,h)=>{
+  const cx=w/2, base=h-6;
+  // 树干
+  g.fillStyle=COL.trunk;
+  g.beginPath();
+  g.moveTo(cx-13,base); g.lineTo(cx+13,base);
+  g.lineTo(cx+8,base-96); g.lineTo(cx-8,base-96); g.closePath(); g.fill();
+  g.fillStyle='rgba(120,40,25,0.35)';
+  g.beginPath(); g.moveTo(cx-13,base); g.lineTo(cx-4,base); g.lineTo(cx-2,base-96); g.lineTo(cx-8,base-96); g.closePath(); g.fill();
+  // 树冠：三层堆叠的圆润三角
+  const layers=[[0,-96,86,72],[0,-160,70,60],[0,-218,50,46]];
+  layers.forEach((L,i)=>{
+    const [ox,oy,rw,rh]=L;
+    g.fillStyle = i===0?COL.treeDark:(i===1?COL.treeMid:'#25B863');
+    g.beginPath();
+    g.moveTo(cx+ox, base+oy);
+    g.bezierCurveTo(cx+ox+rw*0.55, base+oy+rh*0.15, cx+ox+rw*0.82, base+oy+rh*0.72, cx+ox+rw*0.62, base+oy+rh*0.92);
+    g.bezierCurveTo(cx+ox+rw*0.30, base+oy+rh*1.02, cx+ox-rw*0.30, base+oy+rh*1.02, cx+ox-rw*0.62, base+oy+rh*0.92);
+    g.bezierCurveTo(cx+ox-rw*0.82, base+oy+rh*0.72, cx+ox-rw*0.55, base+oy+rh*0.15, cx+ox, base+oy);
+    g.closePath(); g.fill();
+  });
+  // 高光
+  g.fillStyle=COL.treeLight;
+  g.beginPath();
+  g.moveTo(cx-2,base-206);
+  g.bezierCurveTo(cx-26,base-186, cx-36,base-158, cx-30,base-142);
+  g.bezierCurveTo(cx-16,base-152, cx-8,base-178, cx-2,base-206);
+  g.closePath(); g.fill();
+  g.beginPath();
+  g.moveTo(cx-4,base-120);
+  g.bezierCurveTo(cx-40,base-104, cx-52,base-66, cx-44,base-44);
+  g.bezierCurveTo(cx-22,base-58, cx-8,base-90, cx-4,base-120);
+  g.closePath(); g.fill();
+  // 叶簇细节
+  g.fillStyle='rgba(9,120,52,0.30)';
+  [[-20,-58,5],[16,-74,4.5],[-32,-90,4],[26,-108,4],[-14,-140,3.6],[10,-160,3.4],[0,-196,3]].forEach(d=>{
+    g.beginPath(); g.arc(cx+d[0], base+d[1], d[2], 0, TAU); g.fill();
+  });
+});
+
+/* ---- 金币 ---- */
+const COIN = sprite(120,120,(g,w,h)=>{
+  const cx=w/2, cy=h/2, R=44;
+  g.fillStyle=COL.coinRim; circ(g,cx,cy,R); g.fill();
+  const grd = g.createRadialGradient(cx-14,cy-16,4,cx,cy,R*1.05);
+  grd.addColorStop(0,COL.coinHi); grd.addColorStop(0.55,COL.coinMid); grd.addColorStop(1,'#F0A61E');
+  g.fillStyle=grd; circ(g,cx,cy,R-3); g.fill();
+  // 右侧暗弧（体现 3/4 侧面）
+  g.save(); circ(g,cx,cy,R); g.clip();
+  g.beginPath(); g.arc(cx,cy,R*1.06,-Math.PI/2.35,Math.PI/2.35,false);
+  g.arc(cx-16,cy,R*1.06,Math.PI/2.35,-Math.PI/2.35,true); g.closePath();
+  g.fillStyle=COL.coinDark; g.fill(); g.restore();
+  // 内面
+  g.fillStyle='#FFDE6E'; circ(g,cx-3,cy,R*0.70); g.fill();
+  // ¥ 符号
+  g.save();
+  g.font='700 44px '+FONT; g.textAlign='center'; g.textBaseline='middle';
+  g.lineJoin='round'; g.lineWidth=5; g.strokeStyle='#E79A16';
+  g.strokeText('¥',cx-3,cy+1);
+  g.fillStyle='#FFF7D2'; g.fillText('¥',cx-3,cy+1);
+  g.restore();
+  // 高光
+  g.save(); g.globalAlpha=0.8; g.translate(cx-16,cy-22); g.rotate(-0.45);
+  ell(g,0,0,12,6); g.fillStyle='#FFFFFF'; g.fill(); g.restore();
+  g.lineWidth=3; g.strokeStyle='rgba(196,120,10,0.55)'; circ(g,cx,cy,R-1.5); g.stroke();
+});
+
+/* ---- 路障（红白锥 + 深灰菱形底座）---- */
+const CONE = sprite(200,190,(g,w,h)=>{
+  const cx=w/2, base=h-14;
+  // 地面阴影
+  g.globalAlpha=0.22; g.fillStyle='#33254F';
+  ell(g,cx,base+6,62,14); g.fill(); g.globalAlpha=1;
+  // 底座菱形
+  const dia=(y0,sc,f)=>{ g.beginPath();
+    g.moveTo(cx, y0-26*sc); g.quadraticCurveTo(cx+62*sc, y0, cx, y0+26*sc);
+    g.quadraticCurveTo(cx-62*sc, y0, cx, y0-26*sc); g.closePath(); g.fillStyle=f; g.fill(); };
+  dia(base-14,1,'#3F3F49'); dia(base-20,1,COL.plate);
+  g.beginPath();
+  g.moveTo(cx, base-46); g.quadraticCurveTo(cx+52, base-22, cx, base); g.quadraticCurveTo(cx-52, base-22, cx, base-46);
+  g.closePath(); g.fillStyle='#66666F'; g.fill();
+  // 锥体
+  const topY = base-152;
+  g.beginPath();
+  g.moveTo(cx, topY);
+  g.bezierCurveTo(cx+30, topY+52, cx+42, base-70, cx+44, base-24);
+  g.quadraticCurveTo(cx, base-6, cx-44, base-24);
+  g.bezierCurveTo(cx-42, base-70, cx-30, topY+52, cx, topY);
+  g.closePath();
+  const cg = g.createLinearGradient(cx-44,0,cx+44,0);
+  cg.addColorStop(0,'#F5564A'); cg.addColorStop(0.35,COL.coneRed); cg.addColorStop(1,COL.coneRedDark);
+  g.fillStyle=cg; g.fill();
+  // 白色反光带（随锥体收窄）
+  const band=(y,hh)=>{
+    const t=(y-topY)/(base-topY);
+    const hw = 44*Math.pow(t,0.62);
+    const t2=(y+hh-topY)/(base-topY);
+    const hw2 = 44*Math.pow(t2,0.62);
+    g.beginPath();
+    g.moveTo(cx-hw,y); g.lineTo(cx+hw,y); g.lineTo(cx+hw2,y+hh); g.lineTo(cx-hw2,y+hh);
+    g.closePath(); g.fillStyle=COL.coneWhite; g.fill();
+  };
+  band(base-34,15); band(base-66,14);
+  g.beginPath();
+  g.moveTo(cx, topY);
+  g.bezierCurveTo(cx+30, topY+52, cx+42, base-70, cx+44, base-24);
+  g.quadraticCurveTo(cx, base-6, cx-44, base-24);
+  g.bezierCurveTo(cx-42, base-70, cx-30, topY+52, cx, topY);
+  g.closePath();
+  g.lineWidth=3.5; g.strokeStyle='rgba(150,32,24,0.5)'; g.stroke();
+});
+
+/* ---- 油桶（蓝色油壶 + 黄色闪电）---- */
+const CAN = sprite(160,170,(g,w,h)=>{
+  const cx=w/2, cy=h/2+6;
+  g.globalAlpha=0.20; g.fillStyle='#33254F'; ell(g,cx,h-16,36,9); g.fill(); g.globalAlpha=1;
+  g.save(); g.translate(cx,cy);
+  // 壶身
+  g.fillStyle=COL.canBlueDark;
+  rr(g,-38,-50,76,96,16); g.fill();
+  g.fillStyle=COL.canBlue;
+  rr(g,-35,-53,70,96,15); g.fill();
+  // 左侧亮面
+  g.fillStyle=COL.canLight;
+  rr(g,-35,-53,24,96,12); g.fill();
+  // 右下手把缺口（参考图壶身右下有凹陷）
+  g.fillStyle=COL.canBlue;
+  g.beginPath(); g.arc(36,14,20,0,TAU); g.fill();
+  // 右上高光
+  g.save(); g.globalAlpha=0.55; g.strokeStyle='#FFFFFF'; g.lineWidth=5; g.lineCap='round';
+  g.beginPath(); g.moveTo(16,-34); g.quadraticCurveTo(26,-20,20,4); g.stroke(); g.restore();
+  // 壶嘴/提手
+  g.fillStyle=COL.canBlueDark;
+  rr(g,-14,-62,34,18,8); g.fill();
+  // 深灰旋盖
+  g.save(); g.translate(-16,-62); g.rotate(-0.22);
+  g.fillStyle='#3C3C45'; rr(g,-22,-14,44,20,7); g.fill();
+  g.fillStyle=COL.capGray; rr(g,-22,-17,44,16,7); g.fill();
+  g.fillStyle='#6A6A74'; rr(g,-16,-15,30,6,3); g.fill();
+  g.restore();
+  // 闪电
+  g.beginPath();
+  g.moveTo(6,-34); g.lineTo(-16,6); g.lineTo(-2,6); g.lineTo(-10,40); g.lineTo(16,-2); g.lineTo(2,-2); g.closePath();
+  g.lineWidth=5; g.strokeStyle='#FFFFFF'; g.stroke();
+  g.fillStyle='#FFD84D'; g.fill();
+  // 轮廓
+  g.lineWidth=3; g.strokeStyle='rgba(40,120,170,0.45)';
+  rr(g,-36,-54,72,98,16); g.stroke();
+  g.restore();
+});
+
+/* ==========================================================================
+   7. 路边零食道具精灵（参考图：草地两侧为零食主题装饰）
+   ========================================================================== */
+const PROPS = {};
+
+/* 蛋糕切块 */
+PROPS.cakeSlice = sprite(260,220,(g,w,h)=>{
+  const bx=w/2, by=h-18;
+  g.globalAlpha=0.16; g.fillStyle='#2E7A2A'; ell(g,bx,by+6,96,16); g.fill(); g.globalAlpha=1;
+  // 侧板（橙黄夹心）
+  g.fillStyle='#F2A93B';
+  g.beginPath(); g.moveTo(bx-88,by); g.lineTo(bx+90,by-10); g.lineTo(bx+90,by-78); g.lineTo(bx-88,by-64); g.closePath(); g.fill();
+  g.fillStyle='#FFE1A0';
+  g.beginPath(); g.moveTo(bx-88,by-34); g.lineTo(bx+90,by-44); g.lineTo(bx+90,by-56); g.lineTo(bx-88,by-46); g.closePath(); g.fill();
+  g.fillStyle='#E8734E';
+  g.beginPath(); g.moveTo(bx-88,by-64); g.lineTo(bx+90,by-78); g.lineTo(bx+90,by-88); g.lineTo(bx-88,by-74); g.closePath(); g.fill();
+  // 顶面
+  g.fillStyle='#FFC85C';
+  g.beginPath(); g.moveTo(bx-88,by-64); g.lineTo(bx+90,by-78); g.lineTo(bx+52,by-116); g.lineTo(bx-72,by-104); g.closePath(); g.fill();
+  // 奶油顶
+  g.fillStyle='#FFF6E6';
+  g.beginPath(); g.moveTo(bx-74,by-104);
+  g.bezierCurveTo(bx-40,by-134, bx+12,by-136, bx+52,by-118);
+  g.lineTo(bx+50,by-104); g.closePath(); g.fill();
+  // 樱桃
+  g.fillStyle='#E23D3D'; circ(g,bx-24,by-124,13); g.fill();
+  g.fillStyle='#FF6B6B'; circ(g,bx-29,by-129,5); g.fill();
+  g.strokeStyle='#3E8C3A'; g.lineWidth=4; g.beginPath(); g.moveTo(bx-24,by-136); g.quadraticCurveTo(bx-14,by-152,bx+2,by-148); g.stroke();
+  // 小彩糖
+  [['#FF8FC4',-58,-92],['#6FD3F0',26,-96],['#FFD24A',-6,-112]].forEach(p=>{
+    g.save(); g.translate(bx+p[1],by+p[2]); g.rotate(0.4);
+    g.fillStyle=p[0]; rr(g,-9,-6,18,12,4); g.fill(); g.restore();
+  });
+});
+
+/* 甜甜圈 */
+PROPS.donut = sprite(200,200,(g,w,h)=>{
+  const cx=w/2, cy=h/2+12;
+  g.globalAlpha=0.16; g.fillStyle='#2E7A2A'; ell(g,cx,cy+52,58,14); g.fill(); g.globalAlpha=1;
+  g.fillStyle='#E8A867'; circ(g,cx,cy,58); g.fill();
+  g.fillStyle='#F0BC80'; circ(g,cx,cy-4,54); g.fill();
+  g.fillStyle='#FF9EC4';
+  g.beginPath(); g.arc(cx,cy-4,54,0,TAU); g.fill();
+  g.fillStyle='#E8A867'; circ(g,cx,cy-4,20); g.fill();
+  g.fillStyle='#F5C8A0'; circ(g,cx,cy-4,16); g.fill();
+  // 糖霜波浪边
+  g.fillStyle='#FF9EC4';
+  for(let i=0;i<12;i++){
+    const a=i/12*TAU; const r=54+Math.sin(a*3)*4;
+    circ(g,cx+Math.cos(a)*r,cy-4+Math.sin(a)*r*0.42,10); g.fill();
+  }
+  g.fillStyle='#FF9EC4'; circ(g,cx,cy-4,52); g.fill();
+  g.fillStyle='#F5C8A0'; circ(g,cx,cy-4,17); g.fill();
+  // 彩针
+  const cols=['#FFFFFF','#FFD24A','#6FD3F0','#B08CFF','#7BE0A0'];
+  for(let i=0;i<26;i++){
+    const a=rnd(0,TAU), r=rnd(26,50);
+    g.save(); g.translate(cx+Math.cos(a)*r, cy-4+Math.sin(a)*r*0.9); g.rotate(rnd(0,TAU));
+    g.fillStyle=cols[i%cols.length]; rr(g,-6,-2.6,12,5.2,2.6); g.fill(); g.restore();
+  }
+  g.lineWidth=3; g.strokeStyle='rgba(190,110,60,0.35)'; circ(g,cx,cy,58); g.stroke();
+});
+
+/* 马卡龙 */
+PROPS.macaron = sprite(180,150,(g,w,h)=>{
+  const cx=w/2, cy=h/2+14, R=58;
+  g.globalAlpha=0.16; g.fillStyle='#2E7A2A'; ell(g,cx,cy+38,52,12); g.fill(); g.globalAlpha=1;
+  g.fillStyle='#F5A8C8';
+  g.beginPath(); g.ellipse(cx,cy-14,R,R*0.55,0,Math.PI,TAU); g.closePath(); g.fill();
+  g.fillStyle='#FFC7DE';
+  g.beginPath(); g.ellipse(cx,cy+22,R*0.9,R*0.42,0,0,Math.PI); g.closePath(); g.fill();
+  g.fillStyle='#FFF3D0'; rr(g,cx-R*0.82,cy-8,R*1.64,18,8); g.fill();
+  g.fillStyle='rgba(255,255,255,0.55)';
+  g.beginPath(); g.ellipse(cx-20,cy-32,20,8,-0.35,0,TAU); g.fill();
+  // 小圆点装饰
+  g.fillStyle='#FFD9E8';
+  [[-30,cy-40],[6,cy-48],[34,cy-34]].forEach(p=>{ circ(g,cx+p[0],p[1],6); g.fill(); });
+});
+
+/* 礼盒 */
+PROPS.gift = sprite(190,190,(g,w,h)=>{
+  const cx=w/2, by=h-16;
+  g.globalAlpha=0.16; g.fillStyle='#2E7A2A'; ell(g,cx,by+8,58,14); g.fill(); g.globalAlpha=1;
+  const bw=58, bh=84;
+  g.fillStyle='#4FB3E8'; rr(g,cx-bw,by-bh,bw*2,bh,10); g.fill();
+  g.fillStyle='#7FCCF5'; rr(g,cx-bw,by-bh,bw*2,26,10); g.fill();
+  g.fillStyle='#F2547A'; g.fillRect(cx-12,by-bh,24,bh);
+  g.fillRect(cx-bw,by-bh+34,bw*2,20);
+  // 蝴蝶结
+  g.fillStyle='#FF6E90';
+  g.beginPath(); g.moveTo(cx,by-bh-4);
+  g.bezierCurveTo(cx-46,by-bh-52, cx-16,by-bh-66, cx,by-bh-16); g.closePath(); g.fill();
+  g.beginPath(); g.moveTo(cx,by-bh-4);
+  g.bezierCurveTo(cx+46,by-bh-52, cx+16,by-bh-66, cx,by-bh-16); g.closePath(); g.fill();
+  g.fillStyle='#FFD24A'; circ(g,cx,by-bh-14,12); g.fill();
+  g.lineWidth=3; g.strokeStyle='rgba(40,110,160,0.35)'; rr(g,cx-bw,by-bh,bw*2,bh,10); g.stroke();
+});
+
+/* 饼干 / 曲奇 */
+PROPS.cookie = sprite(170,170,(g,w,h)=>{
+  const cx=w/2, cy=h/2+10, R=54;
+  g.globalAlpha=0.16; g.fillStyle='#2E7A2A'; ell(g,cx,cy+44,48,12); g.fill(); g.globalAlpha=1;
+  g.fillStyle='#D89A55'; circ(g,cx,cy,R); g.fill();
+  g.fillStyle='#EFB877'; circ(g,cx,cy-3,R-5); g.fill();
+  g.fillStyle='#8A5A28';
+  const seeds=[[-20,-18,7],[12,-26,6],[26,4,7],[-6,14,6],[-30,12,5],[2,-2,5],[18,-14,4]];
+  seeds.forEach(p=>{ circ(g,cx+p[0],cy-3+p[1],p[2]); g.fill(); });
+  g.lineWidth=3; g.strokeStyle='rgba(150,95,40,0.4)'; circ(g,cx,cy,R); g.stroke();
+});
+
+/* 棒棒糖 */
+PROPS.lolli = sprite(150,240,(g,w,h)=>{
+  const cx=w/2, cy=68, R=52;
+  g.globalAlpha=0.16; g.fillStyle='#2E7A2A'; ell(g,cx,h-14,34,10); g.fill(); g.globalAlpha=1;
+  g.strokeStyle='#F2E4C8'; g.lineWidth=13; g.lineCap='round';
+  g.beginPath(); g.moveTo(cx,h-16); g.lineTo(cx,cy+38); g.stroke();
+  const grd=g.createRadialGradient(cx-16,cy-18,6,cx,cy,R);
+  grd.addColorStop(0,'#FFF0B8'); grd.addColorStop(1,'#F5A21E');
+  g.fillStyle=grd; circ(g,cx,cy,R); g.fill();
+  g.save(); circ(g,cx,cy,R); g.clip();
+  g.strokeStyle='#FFFFFF'; g.lineWidth=13; g.beginPath();
+  for(let a=0;a<Math.PI*7;a+=0.16){
+    const r2=a*4.2; const px=cx+Math.cos(a)*r2, py=cy+Math.sin(a)*r2;
+    if(a===0) g.moveTo(px,py); else g.lineTo(px,py);
+  }
+  g.stroke(); g.restore();
+  g.lineWidth=3.5; g.strokeStyle='rgba(190,120,20,0.45)'; circ(g,cx,cy,R); g.stroke();
+});
+
+/* 冰淇淋圣代塔（参考图右侧大装饰） */
+PROPS.sundae = sprite(280,320,(g,w,h)=>{
+  const cx=w/2, by=h-16;
+  g.globalAlpha=0.16; g.fillStyle='#2E7A2A'; ell(g,cx,by+8,100,18); g.fill(); g.globalAlpha=1;
+  // 红白条纹杯
+  g.fillStyle='#F08A9B'; g.beginPath();
+  g.moveTo(cx-92,by-118); g.lineTo(cx+92,by-118); g.lineTo(cx+62,by); g.lineTo(cx-62,by); g.closePath(); g.fill();
+  g.save(); g.beginPath();
+  g.moveTo(cx-92,by-118); g.lineTo(cx+92,by-118); g.lineTo(cx+62,by); g.lineTo(cx-62,by); g.closePath(); g.clip();
+  g.fillStyle='#FFFFFF';
+  for(let i=-3;i<9;i++){ g.save(); g.translate(cx,by); g.rotate(0.16); g.fillRect(i*26-13, -140, 13, 160); g.restore(); }
+  g.restore();
+  g.fillStyle='#FFD9E0'; rr(g,cx-96,by-134,192,22,11); g.fill();
+  // 粉色冰淇淋球
+  g.fillStyle='#F9A8C0'; circ(g,cx,by-158,70); g.fill();
+  g.fillStyle='#FFC7DA'; circ(g,cx-14,by-172,52); g.fill();
+  // 巧克力片
+  g.fillStyle='#8A5A28'; g.save(); g.translate(cx+46,by-196); g.rotate(0.5); rr(g,-16,-46,30,90,7); g.fill(); g.restore();
+  g.fillStyle='#A97038'; g.save(); g.translate(cx+34,by-186); g.rotate(0.5); rr(g,-10,-36,18,72,6); g.fill(); g.restore();
+  // 星星
+  const star=(x,y,R,rot)=>{ g.beginPath();
+    for(let i=0;i<10;i++){ const rad=(i%2===0)?R:R*0.45; const a=rot+i*Math.PI/5-Math.PI/2;
+      const px=x+Math.cos(a)*rad, py=y+Math.sin(a)*rad; i===0?g.moveTo(px,py):g.lineTo(px,py); }
+    g.closePath(); g.fill(); };
+  g.fillStyle='#FFE066'; star(cx-30,by-140,26,-0.2);
+  g.fillStyle='#FFF6B0'; star(cx+40,by-124,15,0.4);
+});
+
+/* 零食杯（参考图右侧陶土色杯子 + 吸管） */
+PROPS.cup = sprite(200,230,(g,w,h)=>{
+  const cx=w/2, by=h-16;
+  g.globalAlpha=0.16; g.fillStyle='#2E7A2A'; ell(g,cx,by+6,66,14); g.fill(); g.globalAlpha=1;
+  g.fillStyle='#D9694F'; rr(g,cx-56,by-118,112,118,16); g.fill();
+  g.fillStyle='#ED8C6E'; rr(g,cx-56,by-118,112,26,13); g.fill();
+  g.globalAlpha=0.35; g.fillStyle='#FFFFFF'; rr(g,cx-38,by-92,26,74,13); g.fill(); g.globalAlpha=1;
+  g.fillStyle='#9FC4E0'; circ(g,cx+16,by-66,15); g.fill();
+  g.fillStyle='#FFFFFF'; rr(g,cx-8,by-140,20,34,10); g.fill();
+  g.save(); g.translate(cx+6,by-150); g.rotate(0.35);
+  g.fillStyle='#FFF3DC'; rr(g,-11,-44,22,54,11); g.fill(); g.restore();
+  g.lineWidth=3; g.strokeStyle='rgba(160,70,50,0.35)'; rr(g,cx-56,by-118,112,118,16); g.stroke();
+});
+
+/* HXL 木牌（参考图左侧招牌） */
+PROPS.signHXL = sprite(300,240,(g,w,h)=>{
+  const cx=w/2, by=h-10;
+  g.globalAlpha=0.18; g.fillStyle='#2E7A2A'; ell(g,cx,by,100,16); g.fill(); g.globalAlpha=1;
+  g.fillStyle='#8A5A28'; rr(g,cx-13,by-150,26,150,6); g.fill();
+  const board=(y,wd,hh,bg)=>{
+    g.fillStyle=bg;
+    g.beginPath();
+    g.moveTo(cx-wd/2+14,y); g.lineTo(cx+wd/2-6,y-12); g.lineTo(cx+wd/2+16,y+hh*0.5);
+    g.lineTo(cx+wd/2-6,y+hh); g.lineTo(cx-wd/2+14,y+hh+8); g.lineTo(cx-wd/2+34,y+hh*0.5);
+    g.closePath(); g.fill();
+    g.beginPath();
+    g.moveTo(cx-wd/2+16,y+2); g.lineTo(cx+wd/2-6,y-10); g.lineTo(cx+wd/2+14,y+hh*0.5);
+    g.lineTo(cx+wd/2-6,y+hh-2); g.lineTo(cx-wd/2+16,y+hh+6); g.lineTo(cx-wd/2+32,y+hh*0.5);
+    g.closePath();
+    g.strokeStyle='rgba(150,80,30,0.55)'; g.lineWidth=4; g.stroke();
+  };
+  board(by-136,196,58,'#F0924A');
+  g.save(); g.translate(cx+2,by-104); g.rotate(-0.05);
+  txt(g,'HXL',0,0,42,'#FFD24A','900',{stroke:'#B4531F',sw:7,hf:true});
+  g.restore();
+  board(by-58,168,48,'#E8873C');
+  g.fillStyle='#FFD9A0';
+  [[-46,-34,6],[-22,-32,6],[2,-34,6],[26,-32,6]].forEach(p=>{ circ(g,cx+p[0],by+p[1]+22,p[2]); g.fill(); });
+});
+
+/* 白团子吉祥物 + 纸箱（参考图左侧） */
+PROPS.mascot = sprite(220,230,(g,w,h)=>{
+  const cx=w/2, by=h-14;
+  g.globalAlpha=0.16; g.fillStyle='#2E7A2A'; ell(g,cx,by+6,72,15); g.fill(); g.globalAlpha=1;
+  g.fillStyle='#E8A15C'; rr(g,cx-60,by-84,120,84,8); g.fill();
+  g.fillStyle='#F5C08A'; rr(g,cx-60,by-84,120,20,8); g.fill();
+  g.fillStyle='#D98A44'; g.fillRect(cx-6,by-84,12,84);
+  g.save(); g.translate(cx,by-104);
+  g.fillStyle='#FFFFFF';
+  g.beginPath();
+  g.moveTo(-52,4); g.bezierCurveTo(-56,-46,-24,-72,0,-72);
+  g.bezierCurveTo(24,-72,56,-46,52,4);
+  g.bezierCurveTo(28,30,-28,30,-52,4); g.closePath(); g.fill();
+  g.lineWidth=8; g.strokeStyle='#D8352E'; g.stroke();
+  // 生气眉眼
+  g.strokeStyle='#D8352E'; g.lineWidth=7; g.lineCap='round';
+  g.beginPath(); g.moveTo(-34,-26); g.lineTo(-10,-16); g.stroke();
+  g.beginPath(); g.moveTo(34,-26); g.lineTo(10,-16); g.stroke();
+  g.fillStyle='#3E6FD8';
+  g.beginPath(); g.moveTo(-24,-8); g.lineTo(-6,-16); g.lineTo(-10,6); g.closePath(); g.fill();
+  g.beginPath(); g.moveTo(24,-8); g.lineTo(6,-16); g.lineTo(10,6); g.closePath(); g.fill();
+  g.strokeStyle='#3E6FD8'; g.lineWidth=5;
+  g.beginPath(); g.moveTo(-4,-14); g.lineTo(-2,8); g.lineTo(2,0); g.stroke();
+  g.restore();
+});
+
+/* 糖果树丛（带饼干/马卡龙/糖果装饰） */
+PROPS.bush = sprite(260,220,(g,w,h)=>{
+  const cx=w/2, by=h-14;
+  g.globalAlpha=0.16; g.fillStyle='#2E7A2A'; ell(g,cx,by+6,86,16); g.fill(); g.globalAlpha=1;
+  g.fillStyle='#8A5A28'; rr(g,cx-10,by-72,20,72,6); g.fill();
+  const lobes=[[-52,-64,40],[-16,-92,44],[26,-80,40],[52,-52,32],[-68,-40,28],[70,-36,26]];
+  g.fillStyle='#25B75F'; lobes.forEach(l=>{ circ(g,cx+l[0],by+l[1],l[2]); g.fill(); });
+  g.fillStyle='#3FCE74'; lobes.forEach((l,i)=>{ if(i%2===0){ circ(g,cx+l[0]-6,by+l[1]-8,l[2]*0.7); g.fill(); } });
+  // 装饰
+  g.fillStyle='#FF8FB0'; circ(g,cx-40,by-70,13); g.fill();
+  g.fillStyle='#FFD24A'; circ(g,cx+16,by-88,12); g.fill();
+  g.fillStyle='#7FCCF5'; rr(g,cx+38,by-58,26,16,6); g.fill();
+  g.fillStyle='#D89A55'; circ(g,cx-6,by-42,14); g.fill();
+  g.fillStyle='#8A5A28'; [[-10,-46,3],[0,-38,3],[-2,-50,2.5]].forEach(p=>{ circ(g,cx+p[0],by+p[1],p[2]); g.fill(); });
+  g.fillStyle='#FFE066';
+  const star=(x,y,R)=>{ g.beginPath();
+    for(let i=0;i<10;i++){ const rad=(i%2===0)?R:R*0.44; const a=i*Math.PI/5-Math.PI/2;
+      const px=x+Math.cos(a)*rad, py=y+Math.sin(a)*rad; i===0?g.moveTo(px,py):g.lineTo(px,py); }
+    g.closePath(); g.fill(); };
+  star(cx-24,by-24,14); star(cx+52,by-70,12);
+});
+
+/* 草地小叶簇 */
+const LEAF = sprite(90,70,(g,w,h)=>{
+  g.fillStyle='#4FB93A';
+  [0,1,2].forEach(i=>{
+    g.save(); g.translate(w/2, h/2+8);
+    g.rotate((-0.9+i*0.9)*0.9);
+    g.beginPath(); g.moveTo(0,0);
+    g.bezierCurveTo(-16,-8,-16,-26,0,-30);
+    g.bezierCurveTo(16,-26,16,-8,0,0); g.closePath(); g.fill();
+    g.restore();
+  });
+});
+
+/* 4 星闪光 */
+const FLARE = sprite(80,80,(g,w,h)=>{
+  g.fillStyle='#FFFFFF';
+  g.beginPath();
+  g.moveTo(w/2,4); g.quadraticCurveTo(w/2,h/2,w-4,h/2);
+  g.quadraticCurveTo(w/2,h/2,w/2,h-4); g.quadraticCurveTo(w/2,h/2,4,h/2);
+  g.quadraticCurveTo(w/2,h/2,w/2,4); g.closePath(); g.fill();
+});
+
+/* ==========================================================================
+   8. 背景层
+   ========================================================================== */
+const clouds = [];
+for(let i=0;i<4;i++) clouds.push({x:rnd(-40,W+40), y:70+i*88+rnd(-20,20), s:rnd(0.75,1.25), sp:rnd(3,9), a:rnd(0.78,1)});
+
+// 山峦轮廓（实测：多层蓝白剪影，峰顶 y≈235~320，均以草地地平线 y=415 为基座）
+// 采用「填充 + 同色粗描边」使峰顶圆润，贴近参考图的卡通山形
+/* 山脊轮廓：对 key_005.jpg 逐列扫描「山蓝 rgb(8,172,225)」上沿得到（内容坐标）
+   参考图实为「一条主脊 + 一条略深的近脊」，并非三层。 */
+const MTN = [
+  { col: COL.mtnFar, pts:[[-40,415],[0,289],[20,273],[40,228],[70,196],[100,190],[130,198],
+                          [165,250],[195,282],[220,303],[250,313],[280,288],[310,277],[340,291],
+                          [370,300],[400,273],[430,253],[460,240],[490,241],[520,258],[552,262],
+                          [580,219],[600,214],[625,226],[660,268],[700,320],[740,415]] },
+  { col: COL.mtnMid, pts:[[-40,415],[-10,318],[30,300],[70,286],[110,292],[150,312],[190,332],
+                          [230,344],[270,337],[310,330],[350,344],[390,340],[430,318],[470,300],
+                          [510,308],[550,320],[590,282],[620,276],[660,300],[700,352],[740,415]] }
+];
+function ridgePath(pts, base){
+  ctx.beginPath();
+  ctx.moveTo(pts[0][0], base);
+  for(let i=0;i<pts.length;i++) ctx.lineTo(pts[i][0], pts[i][1]);
+  ctx.lineTo(pts[pts.length-1][0], base);
+  ctx.closePath();
+}
+function drawMountains(){
+  MTN.forEach(m=>{
+    ctx.save();
+    ctx.fillStyle=m.col; ctx.strokeStyle=m.col;
+    ctx.lineJoin='round'; ctx.lineCap='round'; ctx.lineWidth=26;
+    ridgePath(m.pts, GRASS_TOP+8);
+    ctx.fill(); ctx.stroke();
+    ctx.restore();
+  });
+}
+
+/* 地平线常驻树木（参考图：左侧 2 棵、右侧 2 棵，位于草地与天空交界处） */
+const TREES = [
+  {x: 86, base:430, h:222},
+  {x:198, base:428, h:196},
+  {x:468, base:428, h:188},
+  {x:590, base:432, h:224}
+];
+function drawTrees(){
+  TREES.forEach(t=>{
+    const sc = t.h/264;                       // TREE 精灵实际内容高 264
+    const w = 240*sc, h = 320*sc;
+    ctx.drawImage(TREE, t.x-120*sc, t.base-314*sc, w, h);
+  });
+}
+
+function drawSky(){
+  const g = ctx.createLinearGradient(0,0,0,GRASS_TOP+20);
+  g.addColorStop(0, COL.skyTop); g.addColorStop(0.42, COL.skyMid); g.addColorStop(1, COL.skyLow);
+  ctx.fillStyle=g; ctx.fillRect(0,0,W,GRASS_TOP+20);
+  // 云
+  clouds.forEach(c=>{
+    ctx.save(); ctx.globalAlpha=c.a;
+    const cw = 220*c.s, ch = 120*c.s;
+    ctx.drawImage(CLOUD[Math.abs(Math.round(c.x))%3], c.x-cw/2, c.y-ch*0.62, cw, ch);
+    ctx.restore();
+  });
+  drawMountains();
+}
+
+function drawGrass(){
+  const g = ctx.createLinearGradient(0,GRASS_TOP,0,H);
+  g.addColorStop(0, COL.grassTop); g.addColorStop(0.30, COL.grassMid); g.addColorStop(1, COL.grassLow);
+  ctx.fillStyle=g; ctx.fillRect(0,GRASS_TOP-1,W,H-GRASS_TOP+1);
+  // 地平线亮带：参考图实测草地为纯色 #76D34E，仅有极窄（约 10px）的提亮过渡
+  const lg = ctx.createLinearGradient(0,GRASS_TOP,0,GRASS_TOP+12);
+  lg.addColorStop(0,'rgba(160,236,120,0.55)'); lg.addColorStop(1,'rgba(160,236,120,0)');
+  ctx.fillStyle=lg; ctx.fillRect(0,GRASS_TOP-1,W,12);
+  // 草地色块（静态纹理，营造参考图的深浅斑块）
+  ctx.save();
+  ctx.globalAlpha=0.13; ctx.fillStyle=COL.grassDark;
+  const patches=[[20,452,110,26],[300,470,150,24],[520,486,150,28],[90,540,130,28],[600,560,130,30],
+                 [180,620,160,32],[-30,700,200,36],[430,740,220,40],[120,880,240,44],[520,980,260,48],
+                 [240,1060,280,50],[-40,1150,300,52]];
+  patches.forEach(p=>{ ell(ctx,p[0]+p[2]/2, p[1], p[2]/2, p[3]/2); ctx.fill(); });
+  ctx.restore();
+}
+
+/* 滚动草地细节（小叶簇），按深度缩放 */
+const grassBits = [];
+resetGrassBits();
+function resetGrassBits(){
+  grassBits.length=0;
+  for(let i=0;i<44;i++) grassBits.push({z:rnd(Z_NEAR+0.4,Z_FAR), wx:(Math.random()<0.5?-1:1)*rnd(4.6,11), s:rnd(0.75,1.35)});
+}
+function drawGrassBits(dt, speed){
+  ctx.save();
+  grassBits.forEach(b=>{
+    b.z -= speed*dt;
+    if(b.z<Z_NEAR+0.25){ b.z = Z_FAR; b.wx = (Math.random()<0.5?-1:1)*rnd(4.6,11); b.s = rnd(0.75,1.35); }
+    const y = gY(b.z), s = sZ(b.z);
+    const x = pX(b.wx, b.z);
+    const hw = halfW(y);
+    // 只在路面之外的草地上绘制
+    if(x>ROAD_CX-hw-10 && x<ROAD_CX+hw+10) return;
+    if(y<GRASS_TOP+2 || y>H+40) return;
+    ctx.globalAlpha = clamp((y-GRASS_TOP)/40,0,0.85);
+    const w = 78*s*b.s, h = 60*s*b.s;
+    ctx.drawImage(LEAF, x-w/2, y-h*0.62, w, h);
+  });
+  ctx.restore();
+}
+
+/* 路边零食道具：按 z 推进，左右交替 */
+const sideProps = [];
+/* 路宽（世界单位）= ROAD_K*C_Z/(PXS*Z_P) = 4.02 → 道具贴路缘放置：
+   wx 取 4.3~4.8，即紧贴白色边线外侧（参考图中零食堆几乎压住路肩） */
+const ROAD_HALF_WU = ROAD_K*C_Z/(PXS*Z_P);
+const PROP_SEQ = [
+  {n:'bush',     side:-1, sc:1.55}, {n:'sundae',  side: 1, sc:1.65},
+  {n:'cakeSlice',side:-1, sc:1.75}, {n:'cup',     side: 1, sc:1.70},
+  {n:'macaron',  side:-1, sc:1.45}, {n:'bush',    side: 1, sc:1.50},
+  {n:'signHXL',  side:-1, sc:1.60}, {n:'donut',   side: 1, sc:1.50},
+  {n:'mascot',   side:-1, sc:1.45}, {n:'cookie',  side: 1, sc:1.45},
+  {n:'gift',     side:-1, sc:1.45}, {n:'sundae',  side: 1, sc:1.55},
+  {n:'lolli',    side:-1, sc:1.45}, {n:'cakeSlice',side: 1, sc:1.65},
+  {n:'bush',     side:-1, sc:1.50}, {n:'macaron', side: 1, sc:1.40}
+];
+let propCursor = 0;
+function spawnProp(z){
+  const d = PROP_SEQ[propCursor % PROP_SEQ.length];
+  propCursor++;
+  sideProps.push({ z:z, n:d.n, side:d.side, sc:d.sc,
+                   wx:d.side*(ROAD_HALF_WU+0.28+rnd(0,0.42)) });
+}
+function initProps(){ sideProps.length=0; propCursor=0;
+  for(let i=0;i<14;i++){ spawnProp(Z_NEAR+0.8+i*1.42); } }
+function drawSideProps(dt, speed){
+  for(let i=sideProps.length-1;i>=0;i--){
+    const p = sideProps[i];
+    p.z -= speed*dt;
+    if(p.z < Z_NEAR){ sideProps.splice(i,1); continue; }
+    const s = sZ(p.z);
+    const y = gY(p.z);
+    if(y<GRASS_TOP-6) continue;
+    const img = PROPS[p.n];
+    const scale = p.sc*s;
+    const w = img.width*scale, h = img.height*scale;
+    let x = pX(p.wx, p.z);
+    // 左侧道具锚点在右侧、右侧道具锚点在左侧，使道具压住路肩（参考图效果）
+    const ax = p.side<0 ? x - w*0.14 : x + w*0.14;
+    const alpha = clamp((y-GRASS_TOP)/40,0,1);
+    ctx.save(); ctx.globalAlpha=alpha;
+    ctx.drawImage(img, ax-w/2, y-h+8, w, h);
+    ctx.restore();
+  }
+  while(sideProps.length<14){
+    const zs = sideProps.map(q=>q.z);
+    spawnProp(zs.length? Math.max(...zs)+1.42 : Z_FAR);
+  }
+}
+
+/* 路面 + 车道线 + 路肩 + 远端白雾 */
+function drawRoad(){
+  const y0 = GRASS_TOP-3, y1 = H+2;      // 路面自草地地平线起（参考图中路面顶点被地平线遮挡）
+  const h0 = halfW(y0), h1 = halfW(y1);
+  // 路面主体：参考图为单一纯色 #8F89A5，不加渐变
+  ctx.fillStyle = COL.road;
+  ctx.beginPath();
+  ctx.moveTo(ROAD_CX-h0,y0); ctx.lineTo(ROAD_CX+h0,y0);
+  ctx.lineTo(ROAD_CX+h1,y1); ctx.lineTo(ROAD_CX-h1,y1); ctx.closePath(); ctx.fill();
+  // 注：参考图路面无可见纹理/条纹，此处刻意不绘制任何噪点或放射线
+  // 路肩：参考图中路缘仅有约 1% 宽度的浅色过渡，不绘制明显灰带
+  const sh = (sgn)=>{
+    const wT = Math.max(1.0,h0*0.012), wB = Math.max(2.5,h1*0.012);
+    ctx.fillStyle=COL.shoulder;
+    ctx.beginPath();
+    ctx.moveTo(ROAD_CX+sgn*h0, y0);
+    ctx.lineTo(ROAD_CX+sgn*(h0+wT), y0);
+    ctx.lineTo(ROAD_CX+sgn*(h1+wB), y1);
+    ctx.lineTo(ROAD_CX+sgn*h1, y1);
+    ctx.closePath(); ctx.fill();
+  };
+  sh(-1); sh(1);
+}
+
+/* 车道线：在世界 z 空间铺虚线，透视自然收缩（实测近处长、远处短） */
+const DASH_LEN = 1.02, DASH_GAP = 0.92;
+function drawLanes(scrollZ){
+  const period = DASH_LEN+DASH_GAP;
+  // 两条分割线位于 ±hw/3
+  for(let k=0;k<2;k++){
+    const wx = (k===0? -1: 1) * DIVIDER_WU;   // 车道分割线：路宽的 1/6 处
+    const base = scrollZ % period;
+    let z = Z_NEAR - base;
+    for(let i=0;i<44;i++, z+=period){
+      const z0 = z, z1 = z+DASH_LEN;
+      if(z1 < Z_NEAR) continue;
+      if(z0 > Z_FAR) break;
+      const a0 = Math.max(z0,Z_NEAR), a1 = Math.min(z1, Z_FAR);
+      const gA = gY(a0), gB = gY(a1);
+      if(Math.abs(gB-gA) < 0.8) continue;          // 注：gY 随 z 递减，必须取绝对值
+      if((gA>H+60 && gB>H+60) || (gA<GRASS_TOP-2 && gB<GRASS_TOP-2)) continue;
+      const wA = Math.max(1.4, halfW(gA)*0.067), wB = Math.max(1.4, halfW(gB)*0.067);
+      const xA = pX(wx, a0), xB = pX(wx, a1);
+      ctx.beginPath();
+      ctx.moveTo(xA-wA/2, gA); ctx.lineTo(xA+wA/2, gA);
+      ctx.lineTo(xB+wB/2, gB); ctx.lineTo(xB-wB/2, gB);
+      ctx.closePath();
+      ctx.fillStyle=COL.lane; ctx.fill();
+    }
+  }
+  // 路缘实线（沿路两侧，参考图中可见的白色边线）
+  const yT = GRASS_TOP-2, yB = H+2;
+  [-1,1].forEach(sgn=>{
+    const xT = ROAD_CX + sgn*halfW(yT), xB = ROAD_CX + sgn*halfW(yB);
+    const wT = Math.max(1.6, halfW(yT)*0.055), wB = Math.max(3, halfW(yB)*0.055);
+    ctx.beginPath();
+    ctx.moveTo(xT-wT/2, yT); ctx.lineTo(xT+wT/2, yT);
+    ctx.lineTo(xB+wB/2, yB); ctx.lineTo(xB-wB/2, yB);
+    ctx.closePath();
+    ctx.fillStyle='rgba(255,255,255,0.92)'; ctx.fill();
+  });
+}
+
+/* 远端白雾（参考图：路面消失处一团亮白柔光，中心贴近草地地平线） */
+/* 远端柔光：参考图实测为「淡青白」而非纯白，中心色 ≈ rgb(161,220,236)，
+   横向半径约 150px、纵向约 55px，且不遮挡两侧山体。 */
+function drawFog(){
+  ctx.save();
+  ctx.translate(ROAD_CX, GRASS_TOP+14);
+  ctx.scale(1,0.40);
+  const g = ctx.createRadialGradient(0,0,3,0,0,132);
+  g.addColorStop(0,   'rgba(246,253,255,0.92)');
+  g.addColorStop(0.30,'rgba(216,243,250,0.66)');
+  g.addColorStop(0.62,'rgba(182,227,241,0.28)');
+  g.addColorStop(1,   'rgba(170,219,237,0)');
+  ctx.fillStyle=g; circ(ctx,0,0,132); ctx.fill();
+  ctx.restore();
+}
+
+/* ==========================================================================
+   9. 角色（白蛋身体 + 红描边 + 黄色外套 + 红裙 + 黑轮）
+   实测：总宽 270、总高 266、着地点 y=1058
+   ========================================================================== */
+function drawRacer(cx, gy, t, boostOn, tilt, mood){
+  ctx.save();
+  ctx.translate(cx, gy);
+  if(tilt) ctx.rotate(tilt);
+  const run = t*13;
+  const bob = Math.sin(run*2)*3.0;
+
+  // 地面阴影
+  ctx.save();
+  ctx.globalAlpha=0.20; ctx.fillStyle='#2A2050';
+  ell(ctx,0,6,104,20); ctx.fill(); ctx.restore();
+
+  // 加速光环
+  if(boostOn){
+    ctx.save();
+    const pulse = 0.60+0.30*Math.sin(t*15);
+    ctx.globalAlpha=pulse;
+    ctx.strokeStyle='rgba(255,255,255,0.95)'; ctx.lineWidth=9;
+    ctx.shadowColor='rgba(255,214,80,0.95)'; ctx.shadowBlur=26;
+    ell(ctx,0,-108,152,64); ctx.stroke();
+    ctx.globalAlpha=pulse*0.5; ctx.strokeStyle='#FFE066'; ctx.lineWidth=4;
+    ell(ctx,0,-108,172,74); ctx.stroke();
+    ctx.restore();
+    // 环绕星星
+    for(let i=0;i<6;i++){
+      const a = t*3.2 + i*TAU/6;
+      const px = Math.cos(a)*140, py = -108 + Math.sin(a)*58;
+      const sc = 0.55+0.45*Math.abs(Math.sin(a));
+      ctx.save(); ctx.globalAlpha=0.9; ctx.translate(px,py); ctx.scale(sc,sc);
+      ctx.drawImage(FLARE,-26,-26,52,52); ctx.restore();
+    }
+  }
+
+  ctx.translate(0, bob);
+
+  /* 车轮 —— 实测参考图车体总宽 185px、轮外缘 ±93px（本函数整体 ×0.92） */
+  const wheel=(wx)=>{
+    ctx.fillStyle='#2B2B33';
+    rr(ctx,wx-35,-78,70,78,17); ctx.fill();
+    ctx.fillStyle='#45454F';
+    rr(ctx,wx-29,-74,58,24,12); ctx.fill();
+    ctx.fillStyle='#5A5A66';
+    rr(ctx,wx-22,-69,18,9,4.5); ctx.fill();
+  };
+  wheel(-68); wheel(68);
+
+  // 红色底盘/裙边
+  ctx.fillStyle='#D93A30';
+  ell(ctx,0,-42,94,32); ctx.fill();
+  ctx.fillStyle='#F2453A';
+  ell(ctx,0,-46,90,30); ctx.fill();
+
+  // 黄色外套主体（实测车身段高 120px）
+  ctx.fillStyle='#F0A81C';
+  ell(ctx,0,-96,88,56); ctx.fill();
+  ctx.fillStyle='#FFC02E';
+  ell(ctx,0,-100,86,53); ctx.fill();
+  // 顶部红色领口（横带）
+  ctx.fillStyle='#E5382B';
+  ell(ctx,0,-136,68,22); ctx.fill();
+  // 领口下方的红色 V
+  ctx.fillStyle='#E5382B';
+  ctx.beginPath(); ctx.moveTo(-19,-134); ctx.lineTo(19,-134); ctx.lineTo(0,-98); ctx.closePath(); ctx.fill();
+  // 高光
+  ctx.save(); ctx.globalAlpha=0.5; ctx.fillStyle='#FFE066';
+  ell(ctx,-36,-112,32,17,-0.22); ctx.fill(); ctx.restore();
+  // 两侧黄色手
+  ctx.fillStyle='#F0A81C';
+  ell(ctx,-84,-94,23,23); ctx.fill(); ell(ctx,84,-94,23,23); ctx.fill();
+  ctx.fillStyle='#FFD84D';
+  ell(ctx,-84,-96,20,20); ctx.fill(); ell(ctx,84,-96,20,20); ctx.fill();
+  ctx.fillStyle='#FFE9A0';
+  ell(ctx,-88,-101,7,6); ctx.fill(); ell(ctx,80,-101,7,6); ctx.fill();
+  // 白色拉链条
+  ctx.fillStyle='#FFFBE8';
+  [-14,0,14].forEach(x=>{ rr(ctx,x-3.6,-86,7.2,36,3.6); ctx.fill(); });
+  // 纽扣
+  ctx.fillStyle='#FFE066'; ctx.strokeStyle='#E8951A'; ctx.lineWidth=2.4;
+  [[-52,-74],[52,-74]].forEach(p=>{ circ(ctx,p[0],p[1],9); ctx.fill(); ctx.stroke(); });
+
+  /* 头部整体上移 33（车身加高后保持头身比例）：
+     实测参考图头段高 140px、车身段高 120px，顶点 y=790、着地 y=1050。 */
+  ctx.save();
+  ctx.translate(0,-33);
+  /* 头部：宽圆顶「双峰」轮廓
+     实测参考图头部 190(w) × 176(h)，顶部为左右两个圆峰，中央有浅凹。 */
+  ctx.beginPath();
+  ctx.moveTo(0,-248);                                   // 中央浅凹（仅下沉 12）
+  ctx.bezierCurveTo(-24,-264, -62,-266, -82,-236);      // 左峰外缘
+  ctx.bezierCurveTo(-98,-212, -99,-192, -97,-168);      // 左侧最宽
+  ctx.bezierCurveTo(-95,-122, -68,-86, -34,-86);        // 左下收口
+  ctx.lineTo(34,-86);
+  ctx.bezierCurveTo(68,-86, 95,-122, 97,-168);          // 右下收口
+  ctx.bezierCurveTo(99,-192, 98,-212, 82,-236);         // 右侧最宽
+  ctx.bezierCurveTo(62,-266, 24,-264, 0,-248);          // 右峰外缘
+  ctx.closePath();
+  ctx.fillStyle='#FFFFFF'; ctx.fill();
+  ctx.lineWidth=8; ctx.strokeStyle='#D8352E'; ctx.lineJoin='round'; ctx.stroke();
+
+  /* 眼睛：浅蓝「叶片」，各占一个圆峰，参考图中两片叶几乎填满峰内 */
+  const eye=(sgn)=>{
+    ctx.save();
+    ctx.translate(sgn*46,-204);
+    ctx.rotate(sgn*0.09);
+    ctx.beginPath();
+    ctx.moveTo(0,-36);                                   // 圆顶（上）
+    ctx.bezierCurveTo(sgn*32,-36, sgn*36,-6,  sgn*24,14);
+    ctx.bezierCurveTo(sgn*16,26,  sgn*6,30,   0,30);     // 下尖
+    ctx.bezierCurveTo(sgn*-6,30,  sgn*-16,26, sgn*-24,14);
+    ctx.bezierCurveTo(sgn*-36,-6, sgn*-32,-36, 0,-36);
+    ctx.closePath();
+    ctx.fillStyle='#A9E2F6'; ctx.fill();
+    ctx.lineWidth=5.5; ctx.strokeStyle='#D8352E'; ctx.stroke();
+    ctx.restore();
+  };
+  eye(-1); eye(1);
+  // 眉心红色竖线（自中央凹口向下，参考图中分界双眼）
+  ctx.strokeStyle='#D8352E'; ctx.lineWidth=6; ctx.lineCap='round';
+  ctx.beginPath(); ctx.moveTo(0,-244); ctx.lineTo(0,-212); ctx.stroke();
+
+  /* 正面表情（仅封面使用）：参考图中角色正对镜头，张嘴大喊 */
+  if(mood==='cover'){
+    // 侧边黄色蝴蝶结
+    ctx.save();
+    ctx.translate(-72,-208); ctx.rotate(-0.35);
+    ctx.fillStyle='#FFC22E';
+    ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(-34,-19); ctx.lineTo(-34,19); ctx.closePath(); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(34,-19); ctx.lineTo(34,19); ctx.closePath(); ctx.fill();
+    ctx.fillStyle='#FFD95E';
+    ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(-30,-15); ctx.lineTo(-30,15); ctx.closePath(); ctx.fill();
+    ctx.fillStyle='#F0A81C'; circ(ctx,0,0,9); ctx.fill();
+    ctx.restore();
+    // 大张的嘴（参考图：面部下缘为鲜红张口、内腔深红、底部浅粉舌头）
+    ctx.beginPath(); ctx.ellipse(0,-126,50,29,0,0,TAU);
+    ctx.fillStyle='#FFFFFF'; ctx.fill();
+    ctx.lineWidth=7; ctx.strokeStyle='#D8352E'; ctx.stroke();
+    ctx.beginPath(); ctx.ellipse(0,-128,41,22,0,0,TAU);
+    ctx.fillStyle='#E8332A'; ctx.fill();
+    ctx.beginPath(); ctx.ellipse(0,-134,32,14,0,0,TAU);
+    ctx.fillStyle='#B31C15'; ctx.fill();
+    ctx.beginPath(); ctx.ellipse(0,-108,22,10,0,0,TAU);
+    ctx.fillStyle='#F4796B'; ctx.fill();
+    // 高光
+    ctx.save(); ctx.globalAlpha=0.42; ctx.fillStyle='#FFFFFF';
+    ell(ctx,-18,-132,15,6,-0.32); ctx.fill(); ctx.restore();
+    // 左上冷汗/闪光
+    ctx.save(); ctx.globalAlpha=0.9; ctx.fillStyle='#A9E2F6';
+    ctx.beginPath();
+    ctx.moveTo(-48,-268);
+    ctx.bezierCurveTo(-36,-258,-32,-248,-40,-242);
+    ctx.bezierCurveTo(-52,-244,-56,-258,-48,-268);
+    ctx.closePath(); ctx.fill();
+    ctx.lineWidth=4; ctx.strokeStyle='#D8352E'; ctx.stroke();
+    ctx.restore();
+  }
+  ctx.restore();   // 结束头部整体上移 33 的变换
+
+  // 摩擦粉尘（轮下白色小团 + 星点）
+  const dust = [[-88,4,15],[-64,12,11],[80,6,14],[58,14,10],[-100,14,9],[92,16,9]];
+  dust.forEach((d,i)=>{
+    const wob = Math.sin(t*20+i*1.7)*2.4;
+    const r = d[2]*(0.75+0.28*Math.abs(Math.sin(t*16+i)));
+    ctx.save(); ctx.globalAlpha=0.72;
+    ctx.fillStyle='#FFFFFF';
+    circ(ctx,d[0]+wob, d[1]+Math.sin(t*14+i)*1.6, r); ctx.fill();
+    ctx.globalAlpha=0.35;
+    circ(ctx,d[0]+wob+3, d[1]+3, r*0.6); ctx.fill();
+    ctx.restore();
+  });
+  sparkle(ctx,-118,-2,7,'#FFFFFF',0.8+0.2*Math.sin(t*22));
+  sparkle(ctx,118,0,6,'#FFFFFF',0.7+0.3*Math.sin(t*18+1));
+  ctx.restore();
+}
+
+/* ==========================================================================
+   10. 游戏实体
+   ========================================================================== */
+let items = [];          // 金币 / 油桶 / 路障
+let particles = [];
+let scrollZ = 0;         // 世界滚动累计（用于车道虚线相位）
+
+function spawnItems(){
+  items.length = 0;
+  let z = Z_FAR;
+  for(let i=0;i<14;i++){
+    const r = Math.random();
+    const lanes = [0,1,2];
+    if(r<0.62){
+      // 金币串（同一车道 3~5 枚）
+      const ln = lanes[rndi(0,2)];
+      const n = rndi(3,5);
+      for(let k=0;k<n;k++) items.push({type:'coin', lane:ln, z:z+k*1.15, dead:false});
+      z += n*1.15 + rnd(1.3,2.4);
+    } else if(r<0.82){
+      items.push({type:'cone', lane:lanes[rndi(0,2)], z:z, dead:false});
+      z += rnd(2.6,4.2);
+    } else {
+      items.push({type:'can', lane:lanes[rndi(0,2)], z:z, dead:false});
+      z += rnd(2.4,3.6);
+    }
+  }
+  // 避免同一 z（±0.6）同时出现 3 条车道障碍，保证可通过
+  const byZ = {};
+  items.forEach(it=>{ const k = Math.round(it.z); (byZ[k]=byZ[k]||[]).push(it); });
+  Object.keys(byZ).forEach(k=>{
+    const g = byZ[k].filter(o=>o.type==='cone');
+    if(g.length>=3) g[2].type='coin';
+  });
+}
+
+/* ==========================================================================
+   11. 游戏状态机
+   ========================================================================== */
+const ST = {LOAD:'load', START:'start', RULES:'rules', TUTOR:'tutor', COUNT:'count',
+            PLAY:'play', PAUSE:'pause', OVER:'over', RESULT:'result', RANK:'rank', PRIZE:'prize'};
+let state = ST.LOAD;
+let stateT = 0;
+
+const G = {
+  score:0, best:0, lane:1, px:0, tLane:1, tilt:0,
+  timeLeft:ROUND_TIME, speed:START_SPEED,
+  boost:0, hits:0, countdown:3.6,   // 开局倒计时 3.6s（依次显示 3→2→1）【待确认：参考图仅见到 "1"】
+  overReason:'crash',
+  reward:null, rank:0, newBest:false,
+  flash:0, shake:0, dim:0
+};
+/* 最高分持久化：优先走 shared.js 的 Store（JSON + 容错封装，跨游戏统一），
+   拿不到 SharedGame 时降级为裸 localStorage。键名沿用 snack_run_best，与旧存档兼容。 */
+const BEST_KEY = 'snack_run_best';
+G.best = (function(){
+  try{
+    const S = window.SharedGame;
+    const raw = (S && S.Store) ? S.Store.get(BEST_KEY, '0') : localStorage.getItem(BEST_KEY);
+    return parseInt(raw || '0', 10) || 0;
+  }catch(e){ return 0; }
+})();
+
+function resetRun(){
+  G.score=0; G.lane=1; G.tLane=1; G.tilt=0; G.px=0;
+  G.timeLeft=ROUND_TIME; G.speed=START_SPEED;
+  G.boost=0; G.hits=0; G.countdown=3.6; G.overReason='crash';
+  G.flash=0; G.shake=0;
+  scrollZ=0; particles.length=0;
+  items.length=0;
+  initProps();
+  spawnItems();
+}
+
+/* 初始态：先把道具铺满屏幕，便于直接看到完整场景 */
+resetRun();
+
+/* 奖励档位【待确认：参考图仅示 1860 分 → 4元券】 */
+function rewardFor(score){
+  if(score>=1800) return {amount:4, label:'4元券游戏'};
+  if(score>=1200) return {amount:2, label:'2元券游戏'};
+  if(score>=600)  return {amount:1, label:'1元券游戏'};
+  return {amount:0, label:'参与奖 · 再来一局'};
+}
+/* 排名推算【待确认：参考图 1860 分 → 排名 1620】 */
+function rankFor(score){
+  return Math.max(1, Math.round(4000 - 1.28*score));
+}
+
+/* ==========================================================================
+   12. 交互
+   ========================================================================== */
+let hits = [];
+const hitRect=(x,y,w,h,fn)=>hits.push({k:'r',x,y,w,h,fn});
+const hitCirc=(x,y,r,fn)=>hits.push({k:'c',x,y,r,fn});
+function hitTest(lx,ly){
+  for(let i=hits.length-1;i>=0;i--){
+    const h=hits[i];
+    if(h.k==='r'){ if(lx>=h.x&&lx<=h.x+h.w&&ly>=h.y&&ly<=h.y+h.h) return h; }
+    else { const dx=lx-h.x, dy=ly-h.y; if(dx*dx+dy*dy<=h.r*h.r) return h; }
+  }
+  return null;
+}
+function toLocal(ev){
+  const r = cv.getBoundingClientRect();
+  const cx = (ev.touches? ev.touches[0].clientX : ev.clientX);
+  const cy = (ev.touches? ev.touches[0].clientY : ev.clientY);
+  return { x:(cx-r.left)/r.width*W, y:(cy-r.top)/r.height*H };
+}
+function moveLane(dir){
+  audioInit();
+  if(state!==ST.PLAY) return;
+  const nl = clamp(G.lane+dir,0,2);
+  if(nl!==G.lane){ G.lane=nl; G.tilt = dir*0.075; sfx.click(); }
+}
+function startCountdown(){
+  audioInit();
+  resetRun();
+  state = ST.COUNT; stateT = 0;
+}
+function beginPlay(){ state = ST.PLAY; stateT = 0; }
+function endRun(reason){
+  G.overReason = reason;
+  G.newBest = G.score > G.best;
+  if(G.newBest) G.best = G.score;
+  try{
+    const S = window.SharedGame;
+    if(S && S.Store) S.Store.set(BEST_KEY, String(G.best));
+    else localStorage.setItem(BEST_KEY, String(G.best));
+  }catch(e){}
+  G.rank = rankFor(G.score);
+  G.reward = rewardFor(G.score);
+  state = ST.OVER; stateT = 0;
+  sfx.over();
+}
+
+let touchStart = null;
+function onDown(ev){
+  ev.preventDefault();
+  const p = toLocal(ev);
+  const h = hitTest(p.x,p.y);
+  if(h){ audioInit(); h.fn(); return; }
+  if(state===ST.PLAY){
+    // 屏幕左/右半区点击亦可移动（参考图以左右按钮为主，触屏常规做法）
+    if(p.x < W*0.5) moveLane(-1); else moveLane(1);
+  }
+  touchStart = p;
+}
+function onUp(ev){
+  if(touchStart && state===ST.PLAY){
+    const p = toLocal(ev.changedTouches? {clientX:ev.changedTouches[0].clientX,clientY:ev.changedTouches[0].clientY} : ev);
+    const dx = p.x-touchStart.x, dy = p.y-touchStart.y;
+    if(Math.abs(dx)>46 && Math.abs(dx)>Math.abs(dy)) moveLane(dx>0?1:-1);
+  }
+  touchStart = null;
+}
+cv.addEventListener('mousedown', onDown);
+cv.addEventListener('mouseup', onUp);
+cv.addEventListener('touchstart', onDown, {passive:false});
+cv.addEventListener('touchend', onUp, {passive:false});
+window.addEventListener('keydown', e=>{
+  audioInit();
+  const k = e.key;
+  if(k==='ArrowLeft'||k==='a'||k==='A'){ moveLane(-1); e.preventDefault(); }
+  else if(k==='ArrowRight'||k==='d'||k==='D'){ moveLane(1); e.preventDefault(); }
+  else if(k==='Enter'||k===' '){
+    e.preventDefault();
+    if(state===ST.START) startCountdown();
+    else if(state===ST.OVER){ state=ST.RESULT; stateT=0; }
+    else if(state===ST.RESULT||state===ST.RANK||state===ST.PRIZE){ state=ST.START; stateT=0; }
+    else if(state===ST.RULES||state===ST.TUTOR){ state=ST.START; stateT=0; }
+  }
+  else if(k==='Escape'){
+    if(state===ST.PLAY){ state=ST.PAUSE; stateT=0; }
+    else if(state===ST.PAUSE){ state=ST.PLAY; }
+  }
+  else if(k==='m'||k==='M'){ setMuted(!muted); }
+});
+
+/* ==========================================================================
+   13. 更新
+   ========================================================================== */
+function update(dt){
+  stateT += dt;
+  G.flash = Math.max(0, G.flash-dt*4);
+  G.shake = Math.max(0, G.shake-dt*6);
+  particles.forEach(p=>{ p.life-=dt; p.x+=p.vx*dt; p.y+=p.vy*dt; p.vy+=p.g*dt; p.rot+=p.vr*dt; });
+  for(let i=particles.length-1;i>=0;i--) if(particles[i].life<=0) particles.splice(i,1);
+
+  if(state===ST.LOAD){
+    if(stateT>0.9){ state=ST.START; stateT=0; }
+    return;
+  }
+  if(state===ST.COUNT){
+    const prev = G.countdown;
+    G.countdown -= dt;
+    if(Math.ceil(prev)!==Math.ceil(G.countdown) && G.countdown>0) sfx.tick();
+    if(G.countdown<=0){ sfx.go(); beginPlay(); }
+    // 倒计时期间场景缓慢滚动（道具推进统一在 drawScene 中处理）
+    scrollZ += 0.6*dt;
+    return;
+  }
+  if(state!==ST.PLAY){
+    // 非游戏态：背景缓慢滚动以保持画面生动
+    scrollZ += 0.8*dt;
+    return;
+  }
+
+  // ---- 进行中 ----
+  G.speed = START_SPEED + (ROUND_TIME-G.timeLeft)*SPEED_GAIN;
+  const sp = G.speed;
+  scrollZ += sp*dt;
+
+  G.timeLeft -= dt;
+  if(G.timeLeft<=0){ G.timeLeft=0; endRun('time'); return; }
+  if(G.boost>0) G.boost = Math.max(0, G.boost-dt);
+
+  // 角色横向平滑
+  const target = laneX(G.lane);
+  G.tLane = target;
+  G.px = lerp(G.px, target, clamp(dt*13,0,1));
+  G.tilt = lerp(G.tilt, 0, clamp(dt*7,0,1));   // 换道倾斜回正速度【待确认】
+
+  // 道具推进 & 碰撞
+  const playerZ = Z_P;
+  for(let i=items.length-1;i>=0;i--){
+    const it = items[i];
+    it.z -= sp*dt;
+    if(it.z < Z_NEAR-0.6){ items.splice(i,1); continue; }
+    if(it.dead) continue;
+    // 碰撞：同一车道且 z 接近玩家
+    if(it.lane===G.lane && Math.abs(it.z-playerZ)<0.42){
+      const iy = gY(it.z);
+      if(it.type==='coin'){
+        it.dead = true;
+        const add = COIN_SCORE*(G.boost>0?BOOST_MUL:1);
+        G.score += add;
+        sfx.coin();
+        burst(it.lane, it.z, 'coin', add);
+      } else if(it.type==='can'){
+        it.dead = true;
+        G.boost = BOOST_TIME;
+        sfx.boost();
+        burst(it.lane, it.z, 'can', 0);
+      } else if(it.type==='cone'){
+        sfx.crash();
+        G.shake = 1;
+        burst(it.lane, it.z, 'crash', 0);
+        endRun('crash');
+        return;
+      }
+    }
+    if(it.z < Z_NEAR-0.5) items.splice(i,1);
+  }
+
+  // 补充道具
+  let maxZ = Z_NEAR;
+  items.forEach(it=>{ if(it.z>maxZ) maxZ=it.z; });
+  while(maxZ < Z_FAR){
+    const r = Math.random();
+    if(r<0.60){
+      const ln=rndi(0,2); const n=rndi(3,5);
+      for(let k=0;k<n;k++) items.push({type:'coin',lane:ln,z:maxZ+1.1+k*1.15,dead:false});
+      maxZ += n*1.15 + rnd(1.2,2.2);
+    } else if(r<0.80){
+      items.push({type:'cone',lane:rndi(0,2),z:maxZ+1.0,dead:false});
+      maxZ += rnd(2.4,3.8);
+    } else {
+      items.push({type:'can',lane:rndi(0,2),z:maxZ+1.0,dead:false});
+      maxZ += rnd(2.2,3.4);
+    }
+  }
+  // 保证同 z 不出现三条道全是障碍
+  const groups={};
+  items.forEach(it=>{ const k=Math.round(it.z*0.8); (groups[k]=groups[k]||[]).push(it); });
+  Object.keys(groups).forEach(k=>{
+    const cs = groups[k].filter(o=>o.type==='cone');
+    if(cs.length>=3) cs[2].type='coin';
+  });
+}
+
+/* 倒计时阶段的道具推进（由 drawScene 统一驱动） */
+
+function burst(lane, z, kind, amount){
+  const y = gY(z), s = sZ(z), x = pX(laneX(lane), z);
+  const n = kind==='coin'?10:(kind==='can'?18:22);
+  for(let i=0;i<n;i++){
+    const a = rnd(0,TAU), sp2 = rnd(60,240)*s;
+    particles.push({
+      x:x, y:y-40*s, vx:Math.cos(a)*sp2, vy:Math.sin(a)*sp2*0.6-90*s,
+      g:520, life:rnd(0.35,0.75), max:0.75,
+      r:rnd(3,8)*s, rot:rnd(0,TAU), vr:rnd(-8,8),
+      col: kind==='coin'? (Math.random()<0.6?'#FFD24A':'#FFF3B0')
+         : kind==='can'? (Math.random()<0.6?'#FFE066':'#FFFFFF')
+         : (Math.random()<0.5?'#F5564A':'#FFFFFF'),
+      star: kind==='can'
+    });
+  }
+  if(kind==='coin'){
+    // 分数飘字
+    const cols = G.boost>0?'#FFE066':'#FFFFFF';
+    particles.push({txt:'+'+amount, x:x, y:y-70*s, vx:0, vy:-130, g:0, life:0.85, max:0.85,
+                    size:34*s+10, col:cols, isText:true, rot:0, vr:0});
+  }
+}
+
+/* ==========================================================================
+   14. 绘制：实体
+   ========================================================================== */
+function drawItems(){
+  // 按 z 从远到近绘制
+  const list = items.slice().sort((a,b)=>b.z-a.z);
+  list.forEach(it=>{
+    if(it.dead) return;
+    const y = gY(it.z), s = sZ(it.z);
+    if(y<GRASS_TOP-4) return;
+    const x = pX(laneX(it.lane), it.z);
+    const img = it.type==='coin'?COIN:(it.type==='cone'?CONE:CAN);
+    const base = it.type==='coin'? 62 : (it.type==='cone'? 132 : 86);
+    const w = base*s, h = img.height/img.width*w;
+    const lift = it.type==='coin' ? 46*s : 0;
+    if(y > H+80) return;
+    ctx.drawImage(img, x-w/2, y-lift-h, w, h);
+  });
+}
+
+function drawParticles(){
+  particles.forEach(p=>{
+    const a = clamp(p.life/p.max,0,1);
+    ctx.save(); ctx.globalAlpha=a;
+    if(p.isText){
+      txt(ctx,p.txt,p.x,p.y,p.size,p.col,'900',{stroke:'rgba(45,45,65,0.9)',sw:6});
+    } else if(p.star){
+      ctx.translate(p.x,p.y); ctx.rotate(p.rot);
+      ctx.drawImage(FLARE,-p.r*2,-p.r*2,p.r*4,p.r*4);
+    } else {
+      ctx.fillStyle=p.col; circ(ctx,p.x,p.y,p.r*a+1); ctx.fill();
+    }
+    ctx.restore();
+  });
+}
+
+/* ==========================================================================
+   15. 绘制：HUD
+   ========================================================================== */
+function drawHUD(){
+  // 「分数」标题 + 两侧短横
+  txt(ctx,'分数',316,134,26,'#FFFFFF','800',{stroke:COL.uiShadow,sw:5,shadow:'rgba(20,40,70,0.35)',shadowY:2});
+  ctx.save();
+  ctx.strokeStyle='#FFFFFF'; ctx.lineWidth=5; ctx.lineCap='round';
+  ctx.beginPath(); ctx.moveTo(237,124); ctx.lineTo(272,124); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(360,124); ctx.lineTo(395,124); ctx.stroke();
+  ctx.restore();
+  // 分数数字
+  const sc = String(G.score);
+  const size = sc.length>4? 62 : (sc.length>3? 70 : 78);
+  ctx.save(); ctx.shadowColor='rgba(20,40,70,0.45)'; ctx.shadowBlur=6; ctx.shadowOffsetY=4;
+  txt(ctx,sc,316,196,size,'#FFFFFF','900',{stroke:COL.uiShadow,sw:Math.max(5,size*0.10)});
+  ctx.restore();
+
+  // 计时条
+  ctx.save();
+  ctx.globalAlpha=0.94;
+  rr(ctx,37,152,140,42,21);
+  const pg = ctx.createLinearGradient(0,152,0,194);
+  pg.addColorStop(0,'rgba(120,205,240,0.90)'); pg.addColorStop(1,'rgba(66,163,208,0.86)');
+  ctx.fillStyle=pg; ctx.fill();
+  ctx.strokeStyle='rgba(255,255,255,0.55)'; ctx.lineWidth=2.4; ctx.stroke();
+  ctx.restore();
+  // 时钟图标
+  const ccx=64, ccy=173, cr=16;
+  ctx.save();
+  ctx.fillStyle='#2E9BCE'; circ(ctx,ccx,ccy,cr); ctx.fill();
+  ctx.strokeStyle='#FFFFFF'; ctx.lineWidth=3; circ(ctx,ccx,ccy,cr-1.2); ctx.stroke();
+  ctx.lineWidth=4.6; ctx.strokeStyle='#FFFFFF'; ctx.lineCap='round';
+  ctx.beginPath(); ctx.moveTo(ccx-4,ccy-cr-3); ctx.lineTo(ccx+4,ccy-cr-3); ctx.stroke();
+  ctx.lineWidth=2.8;
+  ctx.beginPath(); ctx.moveTo(ccx,ccy); ctx.lineTo(ccx,ccy-8); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(ccx,ccy); ctx.lineTo(ccx+6,ccy+3); ctx.stroke();
+  circ(ctx,ccx,ccy,2.2); ctx.fillStyle='#FFFFFF'; ctx.fill();
+  ctx.restore();
+  // 时间文字
+  const tl = Math.max(0,G.timeLeft||ROUND_TIME);
+  const ts = (state===ST.PLAY||state===ST.COUNT)? tl : (state===ST.OVER||state===ST.RESULT? tl : ROUND_TIME);
+  const mm = Math.floor(ts/60), ss = Math.floor(ts%60);
+  txt(ctx,(mm<10?'0':'')+mm+':'+(ss<10?'0':'')+ss, 172,184,31,'#FFFFFF','800',
+      {align:'right',stroke:'rgba(28,86,120,0.55)',sw:4});
+
+  // 返回 / 声音
+  ctx.save();
+  ctx.strokeStyle='rgba(255,255,255,0.92)'; ctx.lineWidth=7; ctx.lineJoin='round'; ctx.lineCap='round';
+  ctx.shadowColor='rgba(30,60,90,0.5)'; ctx.shadowBlur=4;
+  ctx.beginPath(); ctx.moveTo(56,246); ctx.lineTo(40,262); ctx.lineTo(56,278); ctx.stroke();
+  ctx.restore();
+  hitRect(24,234,48,58,()=>{ sfx.click(); if(state===ST.PLAY){state=ST.PAUSE;stateT=0;} else state=ST.START; });
+
+  // 暂停（参考图右上角暂停图标）
+  ctx.save();
+  ctx.globalAlpha=0.92;
+  ctx.fillStyle='rgba(255,255,255,0.34)'; circ(ctx,534,262,21); ctx.fill();
+  ctx.strokeStyle='rgba(255,255,255,0.55)'; ctx.lineWidth=2; circ(ctx,534,262,21); ctx.stroke();
+  ctx.fillStyle='#FFFFFF';
+  rr(ctx,527,252,6,20,3); ctx.fill();
+  rr(ctx,537,252,6,20,3); ctx.fill();
+  ctx.restore();
+  hitCirc(534,262,26,()=>{
+    sfx.click();
+    if(state===ST.PLAY){ state=ST.PAUSE; stateT=0; }
+    else if(state===ST.PAUSE){ state=ST.PLAY; }
+  });
+
+  // 喇叭
+  ctx.save();
+  ctx.globalAlpha=0.92;
+  ctx.fillStyle='rgba(255,255,255,0.34)'; circ(ctx,592,262,21); ctx.fill();
+  ctx.strokeStyle='rgba(255,255,255,0.55)'; ctx.lineWidth=2; circ(ctx,592,262,21); ctx.stroke();
+  ctx.fillStyle='#FFFFFF';
+  ctx.beginPath();
+  ctx.moveTo(584,256); ctx.lineTo(589,256); ctx.lineTo(596,249); ctx.lineTo(596,275); ctx.lineTo(589,268); ctx.lineTo(584,268);
+  ctx.closePath(); ctx.fill();
+  ctx.strokeStyle='#FFFFFF'; ctx.lineWidth=2.8; ctx.lineCap='round';
+  if(muted){
+    ctx.beginPath(); ctx.moveTo(600,253); ctx.lineTo(610,271); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(610,253); ctx.lineTo(600,271); ctx.stroke();
+  } else {
+    ctx.beginPath(); ctx.arc(598,262,6,-0.9,0.9); ctx.stroke();
+    ctx.beginPath(); ctx.arc(598,262,11,-0.9,0.9); ctx.stroke();
+  }
+  ctx.restore();
+  hitCirc(592,262,26,()=>{ setMuted(!muted); sfx.click(); });
+}
+
+/* 左右操作按钮
+   实测（key_005 全图坐标 → 内容坐标 = 全图 y - 113）：
+     圆心 y ≈ 1086-113 = 973；直径 ≈ 120 → r ≈ 60（取 57，与圆角边缘一致）
+     左圆 x 89..188 → 圆心 139；右圆 x 441..550 → 圆心 496 */
+const BTN_Y = 973, BTN_R = 57, BTN_LX = 139, BTN_RX = 496;
+function drawCtrlButtons(){
+  [[BTN_LX,-1],[BTN_RX,1]].forEach(([bx,dir])=>{
+    ctx.save();
+    ctx.fillStyle='rgba(22,18,42,0.34)'; circ(ctx,bx,BTN_Y,BTN_R); ctx.fill();
+    ctx.strokeStyle='rgba(255,255,255,0.18)'; ctx.lineWidth=3; circ(ctx,bx,BTN_Y,BTN_R-1.5); ctx.stroke();
+    // 白色粗箭头（按按钮半径等比）
+    ctx.translate(bx,BTN_Y); ctx.scale(dir,1);
+    ctx.fillStyle='#FFFFFF';
+    ctx.strokeStyle='rgba(90,90,112,0.30)'; ctx.lineWidth=2;
+    ctx.beginPath();
+    ctx.moveTo(-40,-12); ctx.lineTo(-3,-12); ctx.lineTo(-3,-27);
+    ctx.lineTo(27,0); ctx.lineTo(-3,27); ctx.lineTo(-3,12); ctx.lineTo(-40,12);
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.restore();
+    hitCirc(bx,BTN_Y,BTN_R+8,()=>moveLane(dir));
+  });
+}
+
+/* ==========================================================================
+   16. 绘制：场景合成
+   ========================================================================== */
+function drawScene(dt){
+  const spd = state===ST.PLAY? G.speed : 1.2;
+  drawSky();
+  drawGrass();
+  drawGrassBits(dt, spd);
+  drawTrees();
+  drawRoad();
+  drawLanes(scrollZ);
+  drawFog();
+  drawSideProps(dt, spd);
+  drawItems();
+  // 角色（实测参考图角色红体宽 177px → 本体绘制宽 191px，故整体 ×0.92 对齐）
+  const px = ROAD_CX + G.px*PXS;
+  ctx.save();
+  ctx.translate(px, PLAYER_Y);
+  ctx.scale(0.92, 0.92);
+  drawRacer(0, 0, stateT>0? performance.now()/1000 : 0, G.boost>0, G.tilt);
+  ctx.restore();
+  drawParticles();
+  if(G.flash>0){ ctx.save(); ctx.globalAlpha=G.flash*0.35; ctx.fillStyle='#FFFFFF'; ctx.fillRect(0,0,W,H); ctx.restore(); }
+}
+
+/* ==========================================================================
+   17. 界面
+   ========================================================================== */
+const ribbonPath=(c,x,y,w,h,th)=>{
+  c.beginPath();
+  c.moveTo(x-w/2,y);
+  c.bezierCurveTo(x-w*0.32,y+h*0.30, x+w*0.32,y+h*0.30, x+w/2,y);
+  c.lineTo(x+w/2-th,y-h*0.62);
+  c.lineTo(x-w/2+th,y-h*0.62);
+  c.closePath();
+};
+const notchedPath=(c,x,y,w,h,n)=>{
+  c.beginPath();
+  c.moveTo(x-w/2+n,y);
+  c.lineTo(x+w/2-n,y);
+  c.lineTo(x+w/2,y+h/2);
+  c.lineTo(x+w/2-n,y+h);
+  c.lineTo(x-w/2+n,y+h);
+  c.lineTo(x-w/2,y+h/2);
+  c.closePath();
+};
+
+function drawStartCover(t){
+  // 天空 + 光晕
+  const g = ctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,'#3FB6EA'); g.addColorStop(0.5,'#68D4F8'); g.addColorStop(1,'#A9E7FA');
+  ctx.fillStyle=g; ctx.fillRect(0,0,W,H);
+  const bg = ctx.createRadialGradient(140,180,10,140,180,520);
+  bg.addColorStop(0,'rgba(255,255,255,0.55)'); bg.addColorStop(1,'rgba(255,255,255,0)');
+  ctx.fillStyle=bg; ctx.fillRect(0,0,W,H);
+  // 云
+  [[110,150,0.95],[500,110,0.8],[360,255,0.7],[70,330,0.6]].forEach(c=>{
+    const cw=220*c[2], ch=120*c[2];
+    ctx.save(); ctx.globalAlpha=0.92;
+    ctx.drawImage(CLOUD[0], c[0]-cw/2, c[1]-ch*0.62, cw, ch); ctx.restore();
+  });
+  // 三角彩旗
+  ctx.save();
+  ctx.strokeStyle='rgba(255,255,255,0.85)'; ctx.lineWidth=3;
+  ctx.beginPath(); ctx.moveTo(-20,96); ctx.quadraticCurveTo(W/2,150,W+20,86); ctx.stroke();
+  const cols=['#F2547A','#FFD24A','#3FCE74','#4FB3E8','#FF8FB0','#FFD24A','#3FCE74','#F2547A','#4FB3E8'];
+  for(let i=0;i<9;i++){
+    const tt=i/8; const bx=-20+(W+40)*tt;
+    const by=(1-tt)*(1-tt)*96+2*(1-tt)*tt*150+tt*tt*86;
+    ctx.fillStyle=cols[i];
+    ctx.beginPath(); ctx.moveTo(bx-26,by); ctx.lineTo(bx+26,by); ctx.lineTo(bx,by+44); ctx.closePath(); ctx.fill();
+  }
+  ctx.restore();
+  // 远景山峦（参考图封面：地平线处一条淡蓝山脊）
+  ctx.save();
+  ctx.fillStyle='#8FCBEA';
+  ctx.beginPath();
+  ctx.moveTo(-20,706);
+  ctx.bezierCurveTo(90,650, 180,700, 270,672);
+  ctx.bezierCurveTo(360,644, 440,684, 540,664);
+  ctx.bezierCurveTo(600,652, 640,668, 660,662);
+  ctx.lineTo(660,760); ctx.lineTo(-20,760); ctx.closePath(); ctx.fill();
+  ctx.restore();
+
+  // 草地（自地平线铺满下半部）
+  ctx.fillStyle=COL.grassMid;
+  ctx.beginPath(); ctx.moveTo(0,700); ctx.quadraticCurveTo(W*0.5,676,W,706); ctx.lineTo(W,H); ctx.lineTo(0,H); ctx.closePath(); ctx.fill();
+  ctx.fillStyle='rgba(79,185,58,0.30)';
+  for(let i=0;i<16;i++){ ell(ctx, 20+i*44, 760+(i%3)*40, 34, 12); ctx.fill(); }
+
+  // 公路（自左上斜穿至右下，参考图封面构图）
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(-30, 806);
+  ctx.bezierCurveTo(190, 850, 410, 898, 670, 984);
+  ctx.lineTo(670, 1232);
+  ctx.bezierCurveTo(410, 1146, 190, 1098, -30, 1054);
+  ctx.closePath();
+  const rg=ctx.createLinearGradient(0,800,0,1240);
+  rg.addColorStop(0,'#9A94AE'); rg.addColorStop(0.45,COL.road); rg.addColorStop(1,'#7E799A');
+  ctx.fillStyle=rg; ctx.fill();
+  // 路面中央白色虚线
+  ctx.save(); ctx.clip();
+  ctx.fillStyle=COL.lane;
+  for(let k=-1;k<7;k++){
+    const x0=-40+k*118, x1=x0+66;
+    ctx.beginPath();
+    ctx.moveTo(x0, 906+k*40); ctx.lineTo(x1, 934+k*40);
+    ctx.lineTo(x1, 958+k*40); ctx.lineTo(x0, 930+k*40);
+    ctx.closePath(); ctx.fill();
+  }
+  ctx.restore();
+  // 路缘白线
+  ctx.strokeStyle='rgba(232,230,242,0.85)'; ctx.lineWidth=5;
+  ctx.beginPath(); ctx.moveTo(-30,806); ctx.bezierCurveTo(190,850,410,898,670,984); ctx.stroke();
+  ctx.restore();
+
+  // 主标题缎带（红底金字横幅 + 两侧缎带尾）
+  ctx.save();
+  const ty=272, tw=456, th=92;
+  ctx.fillStyle='#B32218';
+  ctx.beginPath();
+  ctx.moveTo(320-tw/2+6,ty); ctx.lineTo(320-tw/2-52,ty-26); ctx.lineTo(320-tw/2-44,ty+30); ctx.lineTo(320-tw/2+22,ty+22); ctx.closePath(); ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(320+tw/2-6,ty); ctx.lineTo(320+tw/2+52,ty-26); ctx.lineTo(320+tw/2+44,ty+30); ctx.lineTo(320+tw/2-22,ty+22); ctx.closePath(); ctx.fill();
+  const tbg=ctx.createLinearGradient(0,ty-th*0.5,0,ty+th*0.5);
+  tbg.addColorStop(0,'#FF6A52'); tbg.addColorStop(0.45,'#EE3B2E'); tbg.addColorStop(1,'#C4241B');
+  ctx.beginPath();
+  ctx.moveTo(320-tw/2, ty+6);
+  ctx.quadraticCurveTo(320, ty-th*0.66, 320+tw/2, ty+6);
+  ctx.quadraticCurveTo(320, ty+th*0.62, 320-tw/2, ty+6);
+  ctx.closePath();
+  ctx.fillStyle=tbg; ctx.fill();
+  ctx.strokeStyle='#9E1B12'; ctx.lineWidth=4; ctx.stroke();
+  ctx.globalAlpha=0.30; ctx.fillStyle='#FFFFFF';
+  ctx.beginPath();
+  ctx.moveTo(320-tw/2+34, ty-16);
+  ctx.quadraticCurveTo(320, ty-th*0.44, 320+tw/2-34, ty-16);
+  ctx.quadraticCurveTo(320, ty-th*0.16, 320-tw/2+34, ty-16);
+  ctx.closePath(); ctx.fill();
+  ctx.globalAlpha=1;
+  txt(ctx,'零食大冒险',320,ty+14,50,'#FFD24A','900',{hf:true,stroke:'#8E1A10',sw:9,
+      shadow:'rgba(90,20,10,0.45)',shadowY:3});
+  ctx.restore();
+
+  // 副标题「每赢 88元 零食金」
+  ctx.save();
+  const py=430, px0=62, pw=470, ph=98;
+  rr(ctx,px0,py-ph/2,pw,ph,22);
+  const pg=ctx.createLinearGradient(0,py-ph/2,0,py+ph/2);
+  pg.addColorStop(0,'#FFF0A6'); pg.addColorStop(1,'#FFD95E');
+  ctx.fillStyle=pg; ctx.fill();
+  ctx.strokeStyle='#E8332A'; ctx.lineWidth=7; ctx.stroke();
+  ctx.save(); ctx.globalAlpha=0.55; ctx.fillStyle='#FFFBDF';
+  rr(ctx,px0+16,py-ph/2+9,pw-32,24,12); ctx.fill(); ctx.restore();
+  txt(ctx,'每日赢',118,py+12,31,'#E8332A','900',{hf:true});
+  txt(ctx,'88',256,py+24,72,'#E8332A','900',{hf:true,stroke:'#FFF7CE',sw:9});
+  txt(ctx,'元',310,py-14,28,'#E8332A','900',{hf:true});
+  txt(ctx,'零食金',432,py+16,40,'#E8332A','900',{hf:true,stroke:'#FFF7CE',sw:6});
+  ctx.restore();
+
+  // 奖品池卡片
+  ctx.save();
+  const qx=566, qy=640;
+  ctx.fillStyle='rgba(120,60,40,0.26)'; rr(ctx,qx-56,qy-2,112,100,14); ctx.fill();
+  ctx.fillStyle='#FFFFFF'; rr(ctx,qx-56,qy-6,112,100,14); ctx.fill();
+  ctx.fillStyle='#E8332A'; rr(ctx,qx-56,qy-6,112,30,14); ctx.fill();
+  ctx.fillStyle='#E8332A'; ctx.fillRect(qx-56,qy+10,112,14);
+  txt(ctx,'奖品池',qx,qy+14,21,'#FFFFFF','900');
+  ctx.fillStyle='#FFE0B0'; rr(ctx,qx-42,qy+30,84,50,10); ctx.fill();
+  ctx.save(); ctx.translate(qx-16,qy+56); ctx.scale(0.30,0.30);
+  ctx.drawImage(COIN,-60,-60,120,120); ctx.restore();
+  txt(ctx,'59',qx+24,qy+68,26,'#E8332A','900');
+  ctx.restore();
+
+  // 右侧图标列
+  const iconBtn=(y,label,fn)=>{
+    ctx.save();
+    ctx.fillStyle='rgba(30,90,60,0.22)'; circ(ctx,592,y+3,31); ctx.fill();
+    ctx.fillStyle='#39C46A'; circ(ctx,592,y,31); ctx.fill();
+    ctx.strokeStyle='#FFFFFF'; ctx.lineWidth=4; circ(ctx,592,y,31); ctx.stroke();
+    const s = label.length>=3? 17 : 21;
+    txt(ctx,label,592,y+7,s,'#FFFFFF','800',{stroke:'rgba(20,90,50,0.5)',sw:3.5});
+    ctx.restore();
+    hitCirc(592,y,36,fn);
+  };
+  iconBtn(320,'规则',()=>{ sfx.click(); state=ST.RULES; stateT=0; });
+  iconBtn(400,'我的奖品',()=>{ sfx.click(); state=ST.PRIZE; stateT=0; });
+  iconBtn(480,'排行榜',()=>{ sfx.click(); state=ST.RANK; stateT=0; });
+
+  // 主角 + 小黄车
+  drawCoverCar(t);
+
+  // 开始按钮
+  ctx.save();
+  const bx=320, by=1120, bw=322, bh=84;
+  ctx.fillStyle='rgba(120,40,20,0.32)'; rr(ctx,bx-bw/2,by-bh/2+7,bw,bh,bh/2); ctx.fill();
+  const bg2=ctx.createLinearGradient(0,by-bh/2,0,by+bh/2);
+  bg2.addColorStop(0,'#FFD84D'); bg2.addColorStop(0.5,'#FFB82E'); bg2.addColorStop(1,'#F59A18');
+  ctx.fillStyle=bg2; rr(ctx,bx-bw/2,by-bh/2,bw,bh,bh/2); ctx.fill();
+  ctx.strokeStyle='#E8332A'; ctx.lineWidth=7; ctx.stroke();
+  ctx.save(); ctx.globalAlpha=0.45; ctx.fillStyle='#FFF8D0';
+  rr(ctx,bx-bw/2+22,by-bh/2+9,bw-44,18,9); ctx.fill(); ctx.restore();
+  txt(ctx,'点击参与',bx-14,by+14,40,'#FFFFFF','900',{hf:true,stroke:'#C4241B',sw:7});
+  ctx.fillStyle='#FFFFFF';
+  ctx.beginPath(); ctx.moveTo(bx+92,by-18); ctx.lineTo(bx+92,by+18); ctx.lineTo(bx+124,by); ctx.closePath(); ctx.fill();
+  ctx.restore();
+  hitRect(bx-bw/2,by-bh/2,bw,bh,()=>{ sfx.click(); startCountdown(); });
+
+  // 左下 HXL 牌
+  ctx.save(); ctx.globalAlpha=0.96;
+  ctx.drawImage(PROPS.signHXL, -22, 946, 300*0.50, 240*0.50);
+  ctx.restore();
+
+  txt(ctx,'最高分  '+G.best, 320, 1032, 26, '#FFFFFF','800',{stroke:'rgba(30,70,110,0.45)',sw:5});
+}
+
+/* 封面上的角色 + 小黄车 */
+function drawCoverCar(t){
+  const cx=320, gy=946;
+  ctx.save(); ctx.translate(cx,gy); ctx.scale(0.94,0.94);
+  // 阴影
+  ctx.save(); ctx.globalAlpha=0.18; ctx.fillStyle='#2A2050'; ell(ctx,0,10,200,26); ctx.fill(); ctx.restore();
+  // 车身
+  const cg=ctx.createLinearGradient(0,-140,0,10);
+  cg.addColorStop(0,'#FFD856'); cg.addColorStop(0.55,'#FFB92E'); cg.addColorStop(1,'#F09512');
+  ctx.fillStyle=cg;
+  ctx.beginPath();
+  ctx.moveTo(-186,0);
+  ctx.bezierCurveTo(-198,-56,-160,-92,-104,-100);
+  ctx.lineTo(-30,-146);
+  ctx.bezierCurveTo(60,-152,150,-124,186,-58);
+  ctx.quadraticCurveTo(196,-16,178,0);
+  ctx.closePath(); ctx.fill();
+  // 红色前保险杠
+  ctx.fillStyle='#EF3B2D';
+  ctx.beginPath();
+  ctx.moveTo(120,-78); ctx.bezierCurveTo(186,-64,200,-24,178,0);
+  ctx.lineTo(96,0); ctx.bezierCurveTo(112,-34,112,-60,120,-78); ctx.closePath(); ctx.fill();
+  ctx.fillStyle='#FF6A55';
+  ctx.beginPath(); ctx.moveTo(126,-74); ctx.bezierCurveTo(176,-62,188,-30,172,-6);
+  ctx.lineTo(150,-6); ctx.bezierCurveTo(160,-34,150,-60,134,-70); ctx.closePath(); ctx.fill();
+  // 蓝色车窗
+  ctx.fillStyle='#4FB3E8';
+  ctx.beginPath();
+  ctx.moveTo(-16,-96); ctx.bezierCurveTo(40,-116,104,-104,132,-74);
+  ctx.lineTo(20,-70); ctx.closePath(); ctx.fill();
+  ctx.fillStyle='rgba(255,255,255,0.45)';
+  ctx.beginPath(); ctx.moveTo(-8,-96); ctx.bezierCurveTo(28,-108,64,-104,84,-92);
+  ctx.lineTo(12,-78); ctx.closePath(); ctx.fill();
+  // 侧门线
+  ctx.strokeStyle='rgba(180,110,10,0.45)'; ctx.lineWidth=4;
+  ctx.beginPath(); ctx.moveTo(4,-70); ctx.lineTo(0,-8); ctx.stroke();
+  // 车轮
+  const wl=(x)=>{
+    ctx.fillStyle='#2B2B33'; rr(ctx,x-46,-46,92,92,26); ctx.fill();
+    ctx.fillStyle='#4A4A55'; circ(ctx,x,0,26); ctx.fill();
+    ctx.fillStyle='#9AA0B0'; circ(ctx,x,0,15); ctx.fill();
+    ctx.fillStyle='#6E7686'; circ(ctx,x,0,7); ctx.fill();
+  };
+  wl(-118); wl(126);
+  // 飘带
+  ctx.save();
+  ctx.strokeStyle='#EF3B2D'; ctx.lineWidth=16; ctx.lineCap='round';
+  ctx.beginPath(); ctx.moveTo(-212,-8); ctx.bezierCurveTo(-120,-70,-40,-28,64,-70); ctx.stroke();
+  ctx.strokeStyle='#FF6A55'; ctx.lineWidth=7;
+  ctx.beginPath(); ctx.moveTo(-212,-8); ctx.bezierCurveTo(-120,-70,-40,-28,64,-70); ctx.stroke();
+  ctx.restore();
+  // 格子旗
+  ctx.save();
+  ctx.translate(-208,-34); ctx.rotate(-0.18);
+  ctx.strokeStyle='#8A5A28'; ctx.lineWidth=8; ctx.lineCap='round';
+  ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(0,120); ctx.stroke();
+  for(let i=0;i<4;i++) for(let j=0;j<3;j++){
+    ctx.fillStyle=((i+j)%2===0)?'#FFFFFF':'#2B2B33';
+    ctx.fillRect(-58+i*20, -66+j*20, 20, 20);
+  }
+  ctx.restore();
+  // 车内红色座舱底衬（填补角色与车身之间的空隙，参考图中角色身后为红色座舱）
+  ctx.save();
+  ctx.fillStyle='#C4291F';
+  ell(ctx,-86,-116,138,52); ctx.fill();
+  ctx.fillStyle='#EF3B2D';
+  ell(ctx,-86,-122,130,46); ctx.fill();
+  ctx.fillStyle='#FF6A55';
+  ell(ctx,-86,-132,116,36); ctx.fill();
+  ctx.restore();
+
+  // 角色（坐在车里，仅露头部；按车身轮廓裁剪，参考图中头部占画面主体）
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(-250,-560); ctx.lineTo(250,-560); ctx.lineTo(250,-64);
+  ctx.lineTo(186,-58);
+  ctx.bezierCurveTo(150,-124,  60,-152, -30,-146);   // 车顶（自右向左）
+  ctx.lineTo(-104,-100);
+  ctx.bezierCurveTo(-160,-92, -198,-56, -186,0);
+  ctx.lineTo(-250,0); ctx.closePath(); ctx.clip();
+  ctx.translate(-16, 100);
+  ctx.scale(1.75,1.75);
+  drawRacer(0, 0, t*0.6, false, 0, 'cover');
+  ctx.restore();
+  // 方向盘 / 手（压在角色身前）
+  ctx.fillStyle='#EF3B2D'; ell(ctx,104,-46,32,12,-0.32); ctx.fill();
+  ctx.fillStyle='#FF6A55'; ell(ctx,104,-49,24,7,-0.32); ctx.fill();
+  ctx.restore();
+}
+
+/* ---- 规则弹窗（参考图：三条白底圆角行） ---- */
+function drawRules(){
+  ctx.save(); ctx.fillStyle='rgba(0,0,0,0.42)'; ctx.fillRect(0,0,W,H); ctx.restore();
+  const rows=[
+    {icon:'coin', txt:'碰到金币 = 获得分数'},
+    {icon:'can',  txt:'碰到油桶 = 3S内分数翻倍'},
+    {icon:'cone', txt:'碰到路障 = 游戏失败'}
+  ];
+  rows.forEach((r,i)=>{
+    const y = 432 + i*110;
+    ctx.save();
+    ctx.shadowColor='rgba(20,30,60,0.22)'; ctx.shadowBlur=14; ctx.shadowOffsetY=5;
+    rr(ctx,26,y,588,92,46); ctx.fillStyle='rgba(255,255,255,0.965)'; ctx.fill();
+    ctx.restore();
+    // 图标底
+    ctx.save();
+    rr(ctx,40,y+12,68,68,20); ctx.fillStyle='rgba(232,234,240,0.95)'; ctx.fill();
+    ctx.restore();
+    const ix=74, iy=y+46;
+    if(r.icon==='coin'){ ctx.drawImage(COIN, ix-31, iy-31, 62, 62); }
+    else if(r.icon==='can'){ ctx.drawImage(CAN, ix-32, iy-36, 64, 68); }
+    else { ctx.drawImage(CONE, ix-40, iy-40, 80, 76); }
+    txt(ctx,r.txt, 420, y+58, 28, '#3D3D3D','700');
+  });
+  // 关闭
+  ctx.save();
+  ctx.fillStyle='rgba(0,0,0,0.20)'; circ(ctx,320,812,34); ctx.fill();
+  ctx.fillStyle='#FFFFFF'; circ(ctx,320,810,34); ctx.fill();
+  ctx.strokeStyle='#6BD6F5'; ctx.lineWidth=5; circ(ctx,320,810,34); ctx.stroke();
+  ctx.strokeStyle='#38B6E8'; ctx.lineWidth=6; ctx.lineCap='round';
+  ctx.beginPath(); ctx.moveTo(308,798); ctx.lineTo(332,822); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(332,798); ctx.lineTo(308,822); ctx.stroke();
+  ctx.restore();
+  hitCirc(320,810,40,()=>{ sfx.click(); state=ST.START; stateT=0; });
+  txt(ctx,'操作：← → 键 / 点击屏幕左右两侧 / 左右按钮',320,878,22,'rgba(255,255,255,0.92)','700',
+      {stroke:'rgba(20,40,70,0.5)',sw:4});
+}
+
+/* ---- 新手引导（参考图：提示文字 + 缩略演示卡） ---- */
+function drawTutor(){
+  ctx.save(); ctx.fillStyle='rgba(0,0,0,0.46)'; ctx.fillRect(0,0,W,H); ctx.restore();
+  txt(ctx,'点击<左右键>控制人物移动',320,382,31,'#FFFFFF','900',
+      {stroke:'rgba(20,30,50,0.75)',sw:7});
+  const cx0=40, cy0=430, cw=560, ch=604;
+  ctx.save();
+  ctx.shadowColor='rgba(0,0,0,0.45)'; ctx.shadowBlur=22; ctx.shadowOffsetY=8;
+  rr(ctx,cx0,cy0,cw,ch,26); ctx.fillStyle='#7A7A88'; ctx.fill();
+  ctx.restore();
+  // 缩略场景
+  ctx.save();
+  rr(ctx,cx0,cy0,cw,ch,26); ctx.clip();
+  const g=ctx.createLinearGradient(0,cy0,0,cy0+180);
+  g.addColorStop(0,'#5FD2FC'); g.addColorStop(1,'#B9EDFB');
+  ctx.fillStyle=g; ctx.fillRect(cx0,cy0,cw,180);
+  [[110,cy0+66,0.7],[420,cy0+62,0.6]].forEach(c=>{
+    ctx.globalAlpha=0.95;
+    ctx.drawImage(CLOUD[0], c[0]-77*c[2], c[1]-42*c[2], 154*c[2], 84*c[2]);
+  });
+  ctx.globalAlpha=1;
+  ctx.fillStyle='#7BDF52'; ctx.fillRect(cx0,cy0+176,cw,ch-176);
+  ctx.fillStyle='#4FB93A'; ctx.globalAlpha=0.35;
+  [[cx0+70,cy0+250,60,18],[cx0+420,cy0+300,70,20],[cx0+200,cy0+430,80,22]].forEach(p=>{
+    ell(ctx,p[0],p[1],p[2],p[3]); ctx.fill();
+  });
+  ctx.globalAlpha=1;
+  // 缩略路面
+  const vy=cy0+186, vyb=cy0+ch+10;
+  const hwT=52, hwB=330;
+  const rp=(inset,fill)=>{
+    ctx.fillStyle=fill;
+    ctx.beginPath();
+    ctx.moveTo(320-hwT+inset*0.06,vy); ctx.lineTo(320+hwT-inset*0.06,vy);
+    ctx.lineTo(320+hwB-inset,vyb); ctx.lineTo(320-hwB+inset,vyb); ctx.closePath(); ctx.fill();
+  };
+  rp(-16,'#C9CCD8'); rp(-8,'#C9CCD8'); rp(0,'#8F89A5');
+  // 虚线
+  [-1,1].forEach(k=>{
+    for(let i=0;i<3;i++){
+      const yA=vy+22+i*76, yB=yA+40;
+      const hA=hwT*(yA-vy)/(vyb-vy)+ (yA-vy)*0.42;
+      const hB=hwT*(yB-vy)/(vyb-vy)+ (yB-vy)*0.42;
+      const xA=320+k*hA*0.66, xB=320+k*hB*0.66;
+      const wA=Math.max(2,hA*0.06), wB=Math.max(2,hB*0.06);
+      ctx.fillStyle='#EDE8FA';
+      ctx.beginPath();
+      ctx.moveTo(xA-wA/2,yA); ctx.lineTo(xA+wA/2,yA);
+      ctx.lineTo(xB+wB/2,yB); ctx.lineTo(xB-wB/2,yB); ctx.closePath(); ctx.fill();
+    }
+  });
+  // 金币
+  [[320,cy0+214,30],[320,cy0+280,38],[190,cy0+340,48]].forEach(p=>{
+    ctx.drawImage(COIN,p[0]-p[2],p[1]-p[2],p[2]*2,p[2]*2);
+  });
+  // 油桶
+  ctx.drawImage(CAN, 190-34, cy0+392-40, 68, 72);
+  // 路障
+  ctx.drawImage(CONE, 442-52, cy0+404-54, 104, 100);
+  // 角色
+  ctx.save(); ctx.translate(320, cy0+ch-88); ctx.scale(0.68,0.68);
+  drawRacer(0,0, stateT, false, 0);
+  ctx.restore();
+  // 缩略按钮
+  [[110,-1],[430,1]].forEach(([bx,dir])=>{
+    ctx.fillStyle='rgba(22,18,42,0.26)'; circ(ctx,bx,cy0+ch-64,36); ctx.fill();
+    ctx.save(); ctx.translate(bx,cy0+ch-64); ctx.scale(dir,1);
+    ctx.fillStyle='#FFFFFF';
+    ctx.beginPath();
+    ctx.moveTo(-24,-7); ctx.lineTo(-2,-7); ctx.lineTo(-2,-16);
+    ctx.lineTo(16,0); ctx.lineTo(-2,16); ctx.lineTo(-2,7); ctx.lineTo(-24,7); ctx.closePath(); ctx.fill();
+    ctx.restore();
+  });
+  ctx.restore();
+  // 开始提示
+  const by=cy0+ch+56;
+  ctx.save();
+  const bg2=ctx.createLinearGradient(0,by-38,0,by+38);
+  bg2.addColorStop(0,'#FFD84D'); bg2.addColorStop(1,'#F59A18');
+  ctx.fillStyle=bg2; rr(ctx,320-140,by-38,280,76,38); ctx.fill();
+  ctx.strokeStyle='#E8332A'; ctx.lineWidth=6; ctx.stroke();
+  txt(ctx,'开始游戏',320,by+13,34,'#FFFFFF','900',{hf:true,stroke:'#C4241B',sw:6});
+  ctx.restore();
+  hitRect(180,by-38,280,76,()=>{ sfx.click(); startCountdown(); });
+}
+
+/* ---- 倒计时 ---- */
+function drawCountdown(){
+  const n = Math.ceil(G.countdown);
+  if(n<=0) return;
+  ctx.save();
+  ctx.fillStyle='rgba(0,0,0,0.46)'; ctx.fillRect(0,0,W,H);
+  const cx=316, cy=480;
+  const frac = 1-(G.countdown%1);
+  const pop = 1+0.16*Math.pow(1-frac,3);
+  ctx.translate(cx,cy); ctx.scale(pop,pop);
+  // 光晕
+  const gg=ctx.createRadialGradient(0,0,20,0,0,132);
+  gg.addColorStop(0,'rgba(255,255,255,0.95)'); gg.addColorStop(0.55,'rgba(255,255,255,0.42)');
+  gg.addColorStop(1,'rgba(255,255,255,0)');
+  ctx.fillStyle=gg; circ(ctx,0,0,132); ctx.fill();
+  ctx.fillStyle='#FFFFFF'; circ(ctx,0,0,76); ctx.fill();
+  const og=ctx.createRadialGradient(-14,-18,6,0,0,76);
+  og.addColorStop(0,'#FFD856'); og.addColorStop(0.6,'#FF9E1E'); og.addColorStop(1,'#F2760C');
+  ctx.fillStyle=og; circ(ctx,0,0,76); ctx.fill();
+  ctx.lineWidth=6; ctx.strokeStyle='rgba(232,90,20,0.55)'; circ(ctx,0,0,74); ctx.stroke();
+  txt(ctx,String(n),0,30,104,'#E8332A','900',{hf:true,stroke:'#FFFFFF',sw:11});
+  ctx.restore();
+}
+
+/* ---- 暂停 ---- */
+function drawPause(){
+  ctx.save(); ctx.fillStyle='rgba(0,0,0,0.52)'; ctx.fillRect(0,0,W,H); ctx.restore();
+  ctx.save();
+  ctx.fillStyle='#FFFFFF'; rr(ctx,96,414,448,398,28); ctx.fill();
+  ctx.strokeStyle='#6BD6F5'; ctx.lineWidth=8; rr(ctx,96,414,448,398,28); ctx.stroke();
+  txt(ctx,'已暂停',320,516,40,'#3D3D3D','900',{hf:true});
+  txt(ctx,'本局分数  '+G.score,320,576,28,'#8A8A8A','700');
+  const btn=(y,label,fill,fn)=>{
+    ctx.save();
+    const g=ctx.createLinearGradient(0,y-32,0,y+32);
+    g.addColorStop(0,fill[0]); g.addColorStop(1,fill[1]);
+    ctx.fillStyle=g; rr(ctx,160,y-32,320,64,32); ctx.fill();
+    ctx.strokeStyle='rgba(255,255,255,0.55)'; ctx.lineWidth=3; ctx.stroke();
+    txt(ctx,label,320,y+11,30,'#FFFFFF','900',{stroke:'rgba(120,40,20,0.5)',sw:5});
+    ctx.restore();
+    hitRect(160,y-32,320,64,fn);
+  };
+  btn(660,'继续游戏',['#FFD84D','#F59A18'],()=>{ sfx.click(); state=ST.PLAY; });
+  btn(748,'重新开始',['#8FD8F0','#4FA8D8'],()=>{ sfx.click(); startCountdown(); });
+  ctx.restore();
+}
+
+/* ---- 结束（参考图：暗底 + 游戏结束 + 数据 + 橙色按钮） ---- */
+function drawOver(){
+  ctx.save();
+  const a = clamp(stateT*2.6,0,1);
+  ctx.globalAlpha=a*0.56; ctx.fillStyle='#0A1220'; ctx.fillRect(0,0,W,H);
+  ctx.restore();
+  const A = clamp(stateT*2.6,0,1);
+  ctx.save(); ctx.globalAlpha=A;
+  txt(ctx,'游戏结束',320,320,50,'#FFFFFF','900',{stroke:'rgba(20,30,50,0.7)',sw:8});
+  // 关闭按钮
+  ctx.save();
+  ctx.fillStyle='#5AC8EE'; circ(ctx,548,318,24); ctx.fill();
+  ctx.strokeStyle='#FFFFFF'; ctx.lineWidth=5; ctx.lineCap='round';
+  ctx.beginPath(); ctx.moveTo(540,310); ctx.lineTo(556,326); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(556,310); ctx.lineTo(540,326); ctx.stroke();
+  ctx.restore();
+  hitCirc(548,318,30,()=>{ sfx.click(); state=ST.START; stateT=0; });
+
+  txt(ctx,'本局分数：'+G.score,320,470,29,'#E6E6EA','700',{stroke:'rgba(10,18,30,0.7)',sw:5});
+  txt(ctx,'您的最高分：'+G.best,320,522,29,'#E6E6EA','700',{stroke:'rgba(10,18,30,0.7)',sw:5});
+  txt(ctx,'当前排名：'+G.rank,320,600,38,'#FF3B30','900',{stroke:'rgba(10,18,30,0.75)',sw:7});
+  if(G.overReason==='time') txt(ctx,'时间到！',320,392,26,'#FFD84D','800',{stroke:'rgba(10,18,30,0.7)',sw:5});
+
+  // 继续挑战按钮
+  const by=772, bw=320, bh=80;
+  ctx.save();
+  ctx.shadowColor='rgba(0,0,0,0.35)'; ctx.shadowBlur=18; ctx.shadowOffsetY=8;
+  const g=ctx.createLinearGradient(0,by-bh/2,0,by+bh/2);
+  g.addColorStop(0,'#FFB552'); g.addColorStop(0.48,'#FF8A2B'); g.addColorStop(1,'#F2621A');
+  ctx.fillStyle=g; rr(ctx,320-bw/2,by-bh/2,bw,bh,bh/2); ctx.fill();
+  ctx.restore();
+  ctx.save();
+  rr(ctx,320-bw/2,by-bh/2,bw,bh,bh/2); ctx.clip();
+  ctx.globalAlpha=0.38; ctx.fillStyle='#FFFFFF';
+  rr(ctx,320-bw/2+26,by-bh/2+8,bw-52,16,8); ctx.fill();
+  ctx.restore();
+  txt(ctx,'继续挑战',320,by+15,36,'#FFFFFF','900',{hf:true,stroke:'rgba(180,70,20,0.55)',sw:6});
+  ctx.restore();
+  hitRect(320-bw/2,by-bh/2,bw,bh,()=>{ sfx.click(); state=ST.RESULT; stateT=0; });
+}
+
+/* ---- 结算卡（参考图：蓝框白卡 + 红色缎带头 + 奖励条 + 领取按钮） ---- */
+function drawResult(){
+  ctx.save();
+  ctx.globalAlpha=clamp(stateT*2.4,0,1)*0.62; ctx.fillStyle='#08101C'; ctx.fillRect(0,0,W,H);
+  ctx.restore();
+  const A = clamp(stateT*2.6,0,1);
+  const pop = 0.90+0.10*Math.min(1,stateT*4.2);
+  ctx.save();
+  ctx.globalAlpha=A;
+  ctx.translate(320,648); ctx.scale(pop,pop); ctx.translate(-320,-648);
+
+  const cx0=40, cy0=246, cw=560, ch=800;
+  // 外发光蓝框
+  ctx.save();
+  ctx.shadowColor='rgba(70,200,245,0.55)'; ctx.shadowBlur=26;
+  rr(ctx,cx0,cy0,cw,ch,30);
+  const fg=ctx.createLinearGradient(cx0,cy0,cx0,cy0+ch);
+  fg.addColorStop(0,'#8AE2FB'); fg.addColorStop(1,'#38B6E8');
+  ctx.fillStyle=fg; ctx.fill();
+  ctx.restore();
+  // 白卡
+  ctx.fillStyle='#FFFFFF'; rr(ctx,cx0+11,cy0+11,cw-22,ch-22,22); ctx.fill();
+
+  // 顶部红缎带
+  ctx.save();
+  ctx.translate(320,cy0+24);
+  ctx.fillStyle='#C4241B';
+  ctx.beginPath();
+  ctx.moveTo(-186,4); ctx.lineTo(-236,-14); ctx.lineTo(-232,34); ctx.lineTo(-178,20); ctx.closePath(); ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(186,4); ctx.lineTo(236,-14); ctx.lineTo(232,34); ctx.lineTo(178,20); ctx.closePath(); ctx.fill();
+  const rg=ctx.createLinearGradient(0,-34,0,40);
+  rg.addColorStop(0,'#FF5A44'); rg.addColorStop(0.5,'#EE3B2E'); rg.addColorStop(1,'#D42A1E');
+  ctx.fillStyle=rg;
+  notchedPath(ctx,0,-6,400,66,22); ctx.fill();
+  ctx.globalAlpha=0.28; ctx.fillStyle='#FFFFFF';
+  notchedPath(ctx,0,-18,392,20,10); ctx.fill();
+  ctx.restore();
+  txt(ctx,'游戏结束',320,cy0+44,42,'#FFFFFF','900',{hf:true,stroke:'rgba(140,20,10,0.55)',sw:7});
+
+  // 关闭按钮
+  ctx.save();
+  ctx.fillStyle='#5AC8EE'; circ(ctx,cx0+cw-30,cy0+16,25); ctx.fill();
+  ctx.strokeStyle='#FFFFFF'; ctx.lineWidth=5; ctx.lineCap='round';
+  ctx.beginPath(); ctx.moveTo(cx0+cw-38,cy0+8); ctx.lineTo(cx0+cw-22,cy0+24); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(cx0+cw-22,cy0+8); ctx.lineTo(cx0+cw-38,cy0+24); ctx.stroke();
+  ctx.restore();
+
+  // 数据
+  txt(ctx,'本局分数：'+G.score,320,cy0+168,31,'#3D3D3D','800');
+  txt(ctx,'您的最高分：'+G.best,320,cy0+226,31,'#3D3D3D','800');
+  txt(ctx,'当前排名：'+G.rank,320,cy0+294,35,'#E8332A','900');
+  ctx.save();
+  ctx.strokeStyle='#EDEDF0'; ctx.lineWidth=3;
+  ctx.beginPath(); ctx.moveTo(cx0+56,cy0+332); ctx.lineTo(cx0+cw-56,cy0+332); ctx.stroke();
+  ctx.restore();
+
+  // 「冲分成功!获得」
+  ctx.save();
+  ctx.font='900 46px '+FONT_H; ctx.textAlign='center'; ctx.textBaseline='alphabetic';
+  ctx.lineJoin='round';
+  const ty=cy0+406;
+  ctx.lineWidth=14; ctx.strokeStyle='#FFE9A8'; ctx.strokeText('冲分成功!获得',320,ty);
+  ctx.lineWidth=8; ctx.strokeStyle='#FFFFFF'; ctx.strokeText('冲分成功!获得',320,ty);
+  const tg=ctx.createLinearGradient(0,ty-40,0,ty+10);
+  tg.addColorStop(0,'#FF8A3D'); tg.addColorStop(0.55,'#F0452B'); tg.addColorStop(1,'#C4241B');
+  ctx.fillStyle=tg; ctx.fillText('冲分成功!获得',320,ty);
+  ctx.restore();
+
+  // 奖励条
+  ctx.save();
+  rr(ctx,cx0+56,cy0+436,cw-112,140,18);
+  ctx.fillStyle='#FFF3E6'; ctx.fill();
+  ctx.strokeStyle='#FFE0C4'; ctx.lineWidth=3; ctx.stroke();
+  // 券图标
+  const ix=cx0+130, iy=cy0+506;
+  ctx.fillStyle='#FFFFFF'; rr(ctx,ix-54,iy-54,108,108,18); ctx.fill();
+  ctx.strokeStyle='#EFEFEF'; ctx.lineWidth=3; ctx.stroke();
+  const amt = G.reward? G.reward.amount : 0;
+  ctx.save();
+  ctx.translate(ix,iy);
+  const cg2=ctx.createLinearGradient(0,-34,0,34);
+  cg2.addColorStop(0,'#FFC24D'); cg2.addColorStop(1,'#F58A1E');
+  ctx.fillStyle=cg2; rr(ctx,-34,-32,68,64,10); ctx.fill();
+  ctx.globalAlpha=0.55; ctx.fillStyle='#FFFFFF';
+  circ(ctx,-34,6,7); ctx.fill(); circ(ctx,34,6,7); ctx.fill();
+  ctx.globalAlpha=1;
+  if(amt>0){
+    txt(ctx,'¥',-13,-2,24,'#FFFFFF','900');
+    txt(ctx,String(amt),11,6,38,'#FFFFFF','900');
+    ctx.fillStyle='rgba(255,255,255,0.92)';
+    rr(ctx,-24,14,48,14,7); ctx.fill();
+    txt(ctx,amt+'元券',0,24,14,'#E8621A','900');
+  } else {
+    txt(ctx,'参与',0,10,22,'#FFFFFF','900');
+  }
+  ctx.restore();
+  txt(ctx, G.reward? G.reward.label : '', 430, cy0+516, 30, '#3D3D3D','800');
+  ctx.restore();
+
+  // 领取按钮
+  const by=cy0+660, bw=316, bh=84;
+  ctx.save();
+  ctx.shadowColor='rgba(200,80,20,0.35)'; ctx.shadowBlur=16; ctx.shadowOffsetY=7;
+  const bg3=ctx.createLinearGradient(0,by-bh/2,0,by+bh/2);
+  bg3.addColorStop(0,'#FFB552'); bg3.addColorStop(0.48,'#FF8A2B'); bg3.addColorStop(1,'#F2621A');
+  ctx.fillStyle=bg3; rr(ctx,320-bw/2,by-bh/2,bw,bh,bh/2); ctx.fill();
+  ctx.restore();
+  ctx.save();
+  rr(ctx,320-bw/2,by-bh/2,bw,bh,bh/2); ctx.clip();
+  ctx.globalAlpha=0.36; ctx.fillStyle='#FFFFFF';
+  rr(ctx,320-bw/2+26,by-bh/2+8,bw-52,16,8); ctx.fill();
+  ctx.restore();
+  txt(ctx, (G.reward&&G.reward.amount>0)?'立即领取':'再来一局', 320, by+14, 36, '#FFFFFF','900',
+      {hf:true, stroke:'rgba(180,70,20,0.5)', sw:6});
+  ctx.restore();
+  hitRect(320-bw/2,by-bh/2,bw,bh,()=>{ sfx.click(); state=ST.START; stateT=0; });
+  hitCirc(cx0+cw-30,cy0+16,32,()=>{ sfx.click(); state=ST.START; stateT=0; });
+}
+
+/* ---- 排行榜（参考图右侧「排行榜」入口；榜单内容为示意数据）---- */
+const MOCK_RANK = [
+  ['零食小王子', 4860], ['奶糖超人', 4420], ['薯片大魔王', 3980],
+  ['棉花糖骑士', 3610], ['巧克力博士', 3280], ['布丁侠', 2960],
+  ['果冻队长', 2540], ['爆米花君', 2180], ['柠檬茶酱', 1750], ['饼干小兵', 1320]
+];
+function drawListPanel(title, rows, footer){
+  ctx.save(); ctx.fillStyle='rgba(6,14,26,0.62)'; ctx.fillRect(0,0,W,H); ctx.restore();
+  const cx0=48, cy0=196, cw=544, ch=880;
+  ctx.save();
+  ctx.shadowColor='rgba(0,0,0,0.35)'; ctx.shadowBlur=24; ctx.shadowOffsetY=10;
+  const fg=ctx.createLinearGradient(cx0,cy0,cx0,cy0+ch);
+  fg.addColorStop(0,'#8AE2FB'); fg.addColorStop(1,'#38B6E8');
+  rr(ctx,cx0,cy0,cw,ch,28); ctx.fillStyle=fg; ctx.fill();
+  ctx.restore();
+  ctx.fillStyle='#FFFFFF'; rr(ctx,cx0+10,cy0+10,cw-20,ch-20,20); ctx.fill();
+  // 标题
+  ctx.save();
+  ctx.translate(320,cy0+8);
+  const rg=ctx.createLinearGradient(0,-30,0,36);
+  rg.addColorStop(0,'#FF5A44'); rg.addColorStop(1,'#D42A1E');
+  ctx.fillStyle=rg; notchedPath(ctx,0,0,300,58,20); ctx.fill();
+  ctx.restore();
+  txt(ctx,title,320,cy0+50,32,'#FFFFFF','900',{hf:true,stroke:'rgba(140,20,10,0.5)',sw:6});
+  // 内容
+  rows.forEach((r,i)=>{
+    const y = cy0+108+i*72;
+    ctx.save();
+    if(r.hl){
+      rr(ctx,cx0+28,y-30,cw-56,64,16);
+      ctx.fillStyle='#FFF3E6'; ctx.fill();
+      ctx.strokeStyle='#FFCE9E'; ctx.lineWidth=3; ctx.stroke();
+    } else if(i%2===0){
+      rr(ctx,cx0+28,y-30,cw-56,64,16);
+      ctx.fillStyle='#F7F8FA'; ctx.fill();
+    }
+    ctx.restore();
+    // 名次徽章
+    const bx=cx0+62;
+    ctx.fillStyle = i<3? ['#FFC93C','#CFD6E0','#E0A96D'][i] : '#E6E9EF';
+    circ(ctx,bx,y,21); ctx.fill();
+    txt(ctx,String(i+1),bx,y+8,21, i<3?'#FFFFFF':'#8A90A0','900');
+    txt(ctx,r.name,cx0+104,y+8,26,'#3D3D3D','700',{align:'left'});
+    txt(ctx,(r.score!==undefined? r.score : r[1])+'',cx0+cw-52,y+8,27,r.hl?'#E8332A':'#8A90A0','800',{align:'right'});
+  });
+  // 关闭
+  const by=cy0+ch-58;
+  ctx.save();
+  const bg=ctx.createLinearGradient(0,by-32,0,by+32);
+  bg.addColorStop(0,'#FFD84D'); bg.addColorStop(1,'#F59A18');
+  ctx.fillStyle=bg; rr(ctx,320-140,by-32,280,64,32); ctx.fill();
+  ctx.strokeStyle='#E8332A'; ctx.lineWidth=5; ctx.stroke();
+  txt(ctx,footer||'返回首页',320,by+11,28,'#FFFFFF','900',{stroke:'#C4241B',sw:5});
+  ctx.restore();
+  hitRect(320-140,by-32,280,64,()=>{ sfx.click(); state=ST.START; stateT=0; });
+}
+function drawRank(){
+  const list = MOCK_RANK.map(r=>({name:r[0], score:r[1], hl:false}));
+  const mine = {name:'我', score:G.best, hl:true};
+  list.push(mine);
+  list.sort((a,b)=>b.score-a.score);
+  drawListPanel('排行榜（最高分）', list.slice(0,11), '返回首页');
+}
+function drawPrize(){
+  const rows = [
+    {name:'1800 分以上 · 4元券游戏', score:'4 元券', hl:G.best>=1800},
+    {name:'1200 分以上 · 2元券游戏', score:'2 元券', hl:G.best>=1200 && G.best<1800},
+    {name:'600 分以上 · 1元券游戏',  score:'1 元券', hl:G.best>=600 && G.best<1200},
+    {name:'600 分以下 · 参与奖',     score:'参与奖', hl:G.best<600},
+    {name:'我的最高分',              score:G.best+'', hl:true}
+  ];
+  drawListPanel('我的奖品', rows, '返回首页');
+}
+
+/* ---- 载入页（参考图 key_001 为纯黑载入画面）---- */
+function drawLoading(){
+  ctx.fillStyle='#000000'; ctx.fillRect(0,0,W,H);
+  const a = 0.55+0.45*Math.sin(stateT*4);
+  ctx.save(); ctx.globalAlpha=a;
+  txt(ctx,'零食大冒险',320,H*0.46,40,'#FFFFFF','900');
+  ctx.restore();
+  const p = clamp(stateT/0.9,0,1);
+  ctx.save();
+  ctx.fillStyle='rgba(255,255,255,0.22)'; rr(ctx,200,H*0.52,240,10,5); ctx.fill();
+  ctx.fillStyle='#FFFFFF'; rr(ctx,200,H*0.52,240*p,10,5); ctx.fill();
+  ctx.restore();
+}
+
+/* ==========================================================================
+   18. 渲染调度与主循环
+   ========================================================================== */
+const SCENE_STATES = [ST.PLAY, ST.PAUSE, ST.OVER, ST.RESULT, ST.RULES, ST.TUTOR, ST.COUNT];
+
+function render(dt){
+  hits.length = 0;
+  ctx.save();
+  if(G.shake>0){
+    ctx.translate(rnd(-1,1)*7*G.shake, rnd(-1,1)*7*G.shake);
+  }
+
+  if(state===ST.LOAD){
+    drawLoading();
+  } else if(state===ST.START || state===ST.RANK || state===ST.PRIZE){
+    drawStartCover(stateT);
+    if(state===ST.RANK) drawRank();
+    if(state===ST.PRIZE) drawPrize();
+  } else if(SCENE_STATES.indexOf(state)>=0){
+    drawScene(dt);
+    drawHUD();
+    drawCtrlButtons();
+    if(state===ST.COUNT) drawCountdown();
+    if(state===ST.PAUSE) drawPause();
+    if(state===ST.RULES) drawRules();
+    if(state===ST.TUTOR) drawTutor();
+    if(state===ST.OVER) drawOver();
+    if(state===ST.RESULT) drawResult();
+  } else {
+    drawStartCover(stateT);
+  }
+
+  ctx.restore();
+}
+
+let last = performance.now();
+function loop(now){
+  let dt = (now-last)/1000;
+  last = now;
+  if(dt>0.05) dt = 0.05;          // 掉帧保护
+  if(dt<0) dt = 0;
+  update(dt);
+  render(dt);
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+
+/* 首次触摸解锁音频 */
+window.addEventListener('pointerdown', audioInit, {once:false});
+
+/* 截图 / 调试入口：?s=start|play|count|pause|over|result|rules|tutor|rank|prize
+   （仅用于开发核对与演示，不影响正常玩法） */
+(function(){
+  let s=null;
+  try{ s = new URLSearchParams(location.search).get('s'); }catch(e){}
+  if(!s) return;
+  const map = {start:ST.START, rules:ST.RULES, tutor:ST.TUTOR, count:ST.COUNT,
+               play:ST.PLAY, pause:ST.PAUSE, over:ST.OVER, result:ST.RESULT,
+               rank:ST.RANK, prize:ST.PRIZE};
+  if(s==='count') G.countdown = 2.35;
+  if(s==='over' || s==='result'){
+    G.score=1860; G.best=1860; G.timeLeft=6.4;
+    G.rank=rankFor(1860); G.reward=rewardFor(1860);
+  }
+  if(s==='play'){ G.timeLeft=57; G.score=60; }   // 预览不加加速光环，便于与参考图比对
+  if(map[s]!==undefined){ state = map[s]; stateT = 1.25; }
+})();
+
+</script>
+</body>
+</html>
