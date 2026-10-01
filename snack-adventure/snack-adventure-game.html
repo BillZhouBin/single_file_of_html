@@ -32,12 +32,16 @@
 /* --------------------------------------------------------------------------
    1. 画布与实测标定参数
    -------------------------------------------------------------------------- */
-const W = 640, H = 1287;              // 逻辑分辨率（参考图内容区 640 x 1287，实测）
+const H = 1287;                       // 逻辑高度（参考图内容区 640 x 1287，实测）
+/* 逻辑宽度按**视口比例动态扩展**（≥640）：原 640 制版不变形、不裁剪，
+   多出来的横向空间由「居中的 640 制版 + 铺满的背景」填充 → 手机上满宽、无左右黑边。 */
+let   W = 640;
+let   XOFF = 0;                       // 640 制版美术在动态宽度下的居中偏移 = (W-640)/2
 // 路面几何（对 key_005.jpg 逐行最小二乘拟合，内容坐标系 = 全图 y − 113）：
 //   路面半宽  = 0.5875 * (y - 296)    ← 10 行采样拟合，残差 < 2px
 //   车道分隔线 = 0.1725 * (y - 285)    ← 6 行采样拟合，残差 < 2px
 const Y_VP    = 296;                  // 路面消失点 y（路面/车道线共同外推点）
-const ROAD_CX = 319;                  // 路面中心线 x（实测 311~319.5，取 319）
+let   ROAD_CX = 319;                  // 路面中心线 x（实测 311~319.5；随动态宽度重算为 W/2）
 const ROAD_K  = 0.5875;               // 路面半宽 = ROAD_K * (y - Y_VP)
 const GRASS_TOP = 415;                // 草地（地平线）上边缘 y（实测）
 
@@ -96,6 +100,10 @@ const VIEW = {s:1, ox:0, oy:0, dpr:1};
 
 function resize(){
   const ww = window.innerWidth, wh = window.innerHeight;
+  // 宽度按视口比例扩展（上限 1120 兜住极端横屏）：满宽且等比、不裁剪
+  W = Math.max(640, Math.min(1120, Math.round(H * ww / Math.max(1, wh))));
+  XOFF = (W - 640) / 2;
+  ROAD_CX = W / 2;
   const s = Math.min(ww/W, wh/H);
   VIEW.s = s;
   VIEW.ox = (ww - W*s)/2;
@@ -700,8 +708,11 @@ function ridgePath(pts, base){
   ctx.closePath();
 }
 function drawMountains(){
+  // 宽度扩展后：以新中心为准横向拉伸（纯剪影，拉伸不可察），保证两侧都铺满
+  const K = W/640;
   MTN.forEach(m=>{
     ctx.save();
+    ctx.translate(ROAD_CX,0); ctx.scale(K,1); ctx.translate(-320,0);
     ctx.fillStyle=m.col; ctx.strokeStyle=m.col;
     ctx.lineJoin='round'; ctx.lineCap='round'; ctx.lineWidth=26;
     ridgePath(m.pts, GRASS_TOP+8);
@@ -718,10 +729,12 @@ const TREES = [
   {x:590, base:432, h:224}
 ];
 function drawTrees(){
+  const K = W/640;
   TREES.forEach(t=>{
     const sc = t.h/264;                       // TREE 精灵实际内容高 264
     const w = 240*sc, h = 320*sc;
-    ctx.drawImage(TREE, t.x-120*sc, t.base-314*sc, w, h);
+    const tx = ROAD_CX + (t.x-320)*K;         // 宽度扩展后随中心外移
+    ctx.drawImage(TREE, tx-120*sc, t.base-314*sc, w, h);
   });
 }
 
@@ -1195,7 +1208,8 @@ function toLocal(ev){
   const r = cv.getBoundingClientRect();
   const cx = (ev.touches? ev.touches[0].clientX : ev.clientX);
   const cy = (ev.touches? ev.touches[0].clientY : ev.clientY);
-  return { x:(cx-r.left)/r.width*W, y:(cy-r.top)/r.height*H };
+  // 减去 XOFF：换算到「640 制版」坐标系，使所有 hit 区域与画面一一对应
+  return { x:(cx-r.left)/r.width*W - XOFF, y:(cy-r.top)/r.height*H };
 }
 function moveLane(dir){
   audioInit();
@@ -1232,7 +1246,8 @@ function onDown(ev){
   if(h){ audioInit(); h.fn(); return; }
   if(state===ST.PLAY){
     // 屏幕左/右半区点击亦可移动（参考图以左右按钮为主，触屏常规做法）
-    if(p.x < W*0.5) moveLane(-1); else moveLane(1);
+    // p 已在 640 制版坐标系内，中心恒为 320
+    if(p.x < 320) moveLane(-1); else moveLane(1);
   }
   touchStart = p;
 }
@@ -1565,7 +1580,7 @@ function drawScene(dt){
   drawRacer(0, 0, stateT>0? performance.now()/1000 : 0, G.boost>0, G.tilt);
   ctx.restore();
   drawParticles();
-  if(G.flash>0){ ctx.save(); ctx.globalAlpha=G.flash*0.35; ctx.fillStyle='#FFFFFF'; ctx.fillRect(0,0,W,H); ctx.restore(); }
+  if(G.flash>0){ ctx.save(); ctx.globalAlpha=G.flash*0.35; ctx.fillStyle='#FFFFFF'; ctx.fillRect(-XOFF,0,W+XOFF,H); ctx.restore(); }
 }
 
 /* ==========================================================================
@@ -1594,10 +1609,10 @@ function drawStartCover(t){
   // 天空 + 光晕
   const g = ctx.createLinearGradient(0,0,0,H);
   g.addColorStop(0,'#3FB6EA'); g.addColorStop(0.5,'#68D4F8'); g.addColorStop(1,'#A9E7FA');
-  ctx.fillStyle=g; ctx.fillRect(0,0,W,H);
+  ctx.fillStyle=g; ctx.fillRect(-XOFF,0,W+XOFF,H);
   const bg = ctx.createRadialGradient(140,180,10,140,180,520);
   bg.addColorStop(0,'rgba(255,255,255,0.55)'); bg.addColorStop(1,'rgba(255,255,255,0)');
-  ctx.fillStyle=bg; ctx.fillRect(0,0,W,H);
+  ctx.fillStyle=bg; ctx.fillRect(-XOFF,0,W+XOFF,H);
   // 云
   [[110,150,0.95],[500,110,0.8],[360,255,0.7],[70,330,0.6]].forEach(c=>{
     const cw=220*c[2], ch=120*c[2];
@@ -1607,10 +1622,10 @@ function drawStartCover(t){
   // 三角彩旗
   ctx.save();
   ctx.strokeStyle='rgba(255,255,255,0.85)'; ctx.lineWidth=3;
-  ctx.beginPath(); ctx.moveTo(-20,96); ctx.quadraticCurveTo(W/2,150,W+20,86); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(-XOFF,96); ctx.quadraticCurveTo(320,150,W-XOFF,86); ctx.stroke();
   const cols=['#F2547A','#FFD24A','#3FCE74','#4FB3E8','#FF8FB0','#FFD24A','#3FCE74','#F2547A','#4FB3E8'];
   for(let i=0;i<9;i++){
-    const tt=i/8; const bx=-20+(W+40)*tt;
+    const tt=i/8; const bx=-XOFF+(W)*tt;
     const by=(1-tt)*(1-tt)*96+2*(1-tt)*tt*150+tt*tt*86;
     ctx.fillStyle=cols[i];
     ctx.beginPath(); ctx.moveTo(bx-26,by); ctx.lineTo(bx+26,by); ctx.lineTo(bx,by+44); ctx.closePath(); ctx.fill();
@@ -1629,9 +1644,9 @@ function drawStartCover(t){
 
   // 草地（自地平线铺满下半部）
   ctx.fillStyle=COL.grassMid;
-  ctx.beginPath(); ctx.moveTo(0,700); ctx.quadraticCurveTo(W*0.5,676,W,706); ctx.lineTo(W,H); ctx.lineTo(0,H); ctx.closePath(); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(-XOFF,700); ctx.quadraticCurveTo(320,676,W-XOFF,706); ctx.lineTo(W-XOFF,H); ctx.lineTo(-XOFF,H); ctx.closePath(); ctx.fill();
   ctx.fillStyle='rgba(79,185,58,0.30)';
-  for(let i=0;i<16;i++){ ell(ctx, 20+i*44, 760+(i%3)*40, 34, 12); ctx.fill(); }
+  for(let i=0;i<Math.ceil(W/44)+2;i++){ ell(ctx, -XOFF+20+i*44, 760+(i%3)*40, 34, 12); ctx.fill(); }
 
   // 公路（自左上斜穿至右下，参考图封面构图）
   ctx.save();
@@ -1852,7 +1867,7 @@ function drawCoverCar(t){
 
 /* ---- 规则弹窗（参考图：三条白底圆角行） ---- */
 function drawRules(){
-  ctx.save(); ctx.fillStyle='rgba(0,0,0,0.42)'; ctx.fillRect(0,0,W,H); ctx.restore();
+  ctx.save(); ctx.fillStyle='rgba(0,0,0,0.42)'; ctx.fillRect(-XOFF,0,W+XOFF,H); ctx.restore();
   const rows=[
     {icon:'coin', txt:'碰到金币 = 获得分数'},
     {icon:'can',  txt:'碰到油桶 = 3S内分数翻倍'},
@@ -1890,7 +1905,7 @@ function drawRules(){
 
 /* ---- 新手引导（参考图：提示文字 + 缩略演示卡） ---- */
 function drawTutor(){
-  ctx.save(); ctx.fillStyle='rgba(0,0,0,0.46)'; ctx.fillRect(0,0,W,H); ctx.restore();
+  ctx.save(); ctx.fillStyle='rgba(0,0,0,0.46)'; ctx.fillRect(-XOFF,0,W+XOFF,H); ctx.restore();
   txt(ctx,'点击<左右键>控制人物移动',320,382,31,'#FFFFFF','900',
       {stroke:'rgba(20,30,50,0.75)',sw:7});
   const cx0=40, cy0=430, cw=560, ch=604;
@@ -1979,7 +1994,7 @@ function drawCountdown(){
   const n = Math.ceil(G.countdown);
   if(n<=0) return;
   ctx.save();
-  ctx.fillStyle='rgba(0,0,0,0.46)'; ctx.fillRect(0,0,W,H);
+  ctx.fillStyle='rgba(0,0,0,0.46)'; ctx.fillRect(-XOFF,0,W+XOFF,H);
   const cx=316, cy=480;
   const frac = 1-(G.countdown%1);
   const pop = 1+0.16*Math.pow(1-frac,3);
@@ -2000,7 +2015,7 @@ function drawCountdown(){
 
 /* ---- 暂停 ---- */
 function drawPause(){
-  ctx.save(); ctx.fillStyle='rgba(0,0,0,0.52)'; ctx.fillRect(0,0,W,H); ctx.restore();
+  ctx.save(); ctx.fillStyle='rgba(0,0,0,0.52)'; ctx.fillRect(-XOFF,0,W+XOFF,H); ctx.restore();
   ctx.save();
   ctx.fillStyle='#FFFFFF'; rr(ctx,96,414,448,398,28); ctx.fill();
   ctx.strokeStyle='#6BD6F5'; ctx.lineWidth=8; rr(ctx,96,414,448,398,28); ctx.stroke();
@@ -2025,7 +2040,7 @@ function drawPause(){
 function drawOver(){
   ctx.save();
   const a = clamp(stateT*2.6,0,1);
-  ctx.globalAlpha=a*0.56; ctx.fillStyle='#0A1220'; ctx.fillRect(0,0,W,H);
+  ctx.globalAlpha=a*0.56; ctx.fillStyle='#0A1220'; ctx.fillRect(-XOFF,0,W+XOFF,H);
   ctx.restore();
   const A = clamp(stateT*2.6,0,1);
   ctx.save(); ctx.globalAlpha=A;
@@ -2065,7 +2080,7 @@ function drawOver(){
 /* ---- 结算卡（参考图：蓝框白卡 + 红色缎带头 + 奖励条 + 领取按钮） ---- */
 function drawResult(){
   ctx.save();
-  ctx.globalAlpha=clamp(stateT*2.4,0,1)*0.62; ctx.fillStyle='#08101C'; ctx.fillRect(0,0,W,H);
+  ctx.globalAlpha=clamp(stateT*2.4,0,1)*0.62; ctx.fillStyle='#08101C'; ctx.fillRect(-XOFF,0,W+XOFF,H);
   ctx.restore();
   const A = clamp(stateT*2.6,0,1);
   const pop = 0.90+0.10*Math.min(1,stateT*4.2);
@@ -2189,7 +2204,7 @@ const MOCK_RANK = [
   ['果冻队长', 2540], ['爆米花君', 2180], ['柠檬茶酱', 1750], ['饼干小兵', 1320]
 ];
 function drawListPanel(title, rows, footer){
-  ctx.save(); ctx.fillStyle='rgba(6,14,26,0.62)'; ctx.fillRect(0,0,W,H); ctx.restore();
+  ctx.save(); ctx.fillStyle='rgba(6,14,26,0.62)'; ctx.fillRect(-XOFF,0,W+XOFF,H); ctx.restore();
   const cx0=48, cy0=196, cw=544, ch=880;
   ctx.save();
   ctx.shadowColor='rgba(0,0,0,0.35)'; ctx.shadowBlur=24; ctx.shadowOffsetY=10;
@@ -2258,7 +2273,7 @@ function drawPrize(){
 
 /* ---- 载入页（参考图 key_001 为纯黑载入画面）---- */
 function drawLoading(){
-  ctx.fillStyle='#000000'; ctx.fillRect(0,0,W,H);
+  ctx.fillStyle='#000000'; ctx.fillRect(-XOFF,0,W+XOFF,H);
   const a = 0.55+0.45*Math.sin(stateT*4);
   ctx.save(); ctx.globalAlpha=a;
   txt(ctx,'零食大冒险',320,H*0.46,40,'#FFFFFF','900');
@@ -2283,13 +2298,20 @@ function render(dt){
   }
 
   if(state===ST.LOAD){
+    ctx.save(); ctx.translate(XOFF,0);
     drawLoading();
+    ctx.restore();
   } else if(state===ST.START || state===ST.RANK || state===ST.PRIZE){
+    ctx.save(); ctx.translate(XOFF,0);
     drawStartCover(stateT);
-    if(state===ST.RANK) drawRank();
-    if(state===ST.PRIZE) drawPrize();
+    ctx.restore();
+    if(state===ST.RANK) { ctx.save(); ctx.translate(XOFF,0); drawRank(); ctx.restore(); }
+    if(state===ST.PRIZE){ ctx.save(); ctx.translate(XOFF,0); drawPrize(); ctx.restore(); }
   } else if(SCENE_STATES.indexOf(state)>=0){
+    // 世界层：铺满动态宽度（路面/道具/角色按 ROAD_CX 自动居中）
     drawScene(dt);
+    // UI 层：按原 640 制版坐标绘制，整体居中
+    ctx.save(); ctx.translate(XOFF,0);
     drawHUD();
     drawCtrlButtons();
     if(state===ST.COUNT) drawCountdown();
@@ -2298,8 +2320,11 @@ function render(dt){
     if(state===ST.TUTOR) drawTutor();
     if(state===ST.OVER) drawOver();
     if(state===ST.RESULT) drawResult();
+    ctx.restore();
   } else {
+    ctx.save(); ctx.translate(XOFF,0);
     drawStartCover(stateT);
+    ctx.restore();
   }
 
   ctx.restore();
