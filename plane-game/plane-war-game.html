@@ -33,14 +33,22 @@
     overflow:hidden; -webkit-user-select:none; user-select:none;
     touch-action:none;
   }
-  /* 游戏外壳：竖屏 9:16，高度优先 */
+  /* 游戏外壳：手机竖屏铺满；桌面/横屏保持 240:400 居中列 */
   .shell{
     position:relative;
-    height:min(100vh, calc(100vw * 400 / 240));
-    aspect-ratio:240/400;
+    width:100vw;
+    height:100vh;
+    height:100dvh;
     background:var(--bg-void);
-    box-shadow:0 0 0 3px var(--border), 0 0 40px #000a, 0 0 80px #3a2a6b55;
     overflow:hidden;
+  }
+  @media (min-aspect-ratio: 3/4) {
+    .shell{
+      width:auto;
+      height:min(100vh, calc(100vw * 400 / 240));
+      aspect-ratio:240/400;
+      box-shadow:0 0 0 3px var(--border), 0 0 40px #000a, 0 0 80px #3a2a6b55;
+    }
   }
   canvas{
     display:block; width:100%; height:100%;
@@ -190,10 +198,21 @@
 <script>
 (() => {
   "use strict";
-  const W = 240, H = 400;
+  const H = 400;
+  let   W = 240;               // 动态逻辑宽：按容器宽高比扩展（手机短视口满宽）
   const cv = document.getElementById('game');
   const ctx = cv.getContext('2d');
   ctx.imageSmoothingEnabled = false;
+
+  // 尺寸自适应：竖屏铺满，逻辑宽按容器比例扩展（clamp 240..480）
+  function resizeCanvas(){
+    const box = document.getElementById('shell').getBoundingClientRect();
+    W = Math.max(240, Math.min(480, Math.round(H * box.width / Math.max(1, box.height))));
+    cv.width = W; cv.height = H;
+    ctx.imageSmoothingEnabled = false;
+  }
+  window.addEventListener('resize', resizeCanvas);
+  resizeCanvas();
 
   // ── DOM ──
   const el = {

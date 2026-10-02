@@ -59,16 +59,25 @@
   }
   .game-shell{
     position:relative;
-    width:min(100vw, calc(100vh * 270 / 480));
-    aspect-ratio:270 / 480;
+    width:100vw;                 /* 手机竖屏铺满（动态逻辑宽适配，无黑边） */
+    height:100vh;
+    height:100dvh;
     margin:auto;
     background:#171923;
-    border-radius:12px;
-    box-shadow:
-      0 0 0 4px #2d3748,
-      0 0 0 6px #0d1117,
-      0 30px 70px -25px #000000cc;
     overflow:hidden;
+  }
+  /* 桌面/横屏：保持 270:480 居中列街机框观感 */
+  @media (min-aspect-ratio: 3/4) {
+    .game-shell{
+      width:min(100vw, calc(100vh * 270 / 480));
+      height:auto;
+      aspect-ratio:270 / 480;
+      border-radius:12px;
+      box-shadow:
+        0 0 0 4px #2d3748,
+        0 0 0 6px #0d1117,
+        0 30px 70px -25px #000000cc;
+    }
   }
   canvas{ width:100%; height:100%; display:block; image-rendering:pixelated; touch-action:none; -webkit-user-select:none; user-select:none; }
 
@@ -347,10 +356,22 @@
 <script>
 "use strict";
 (function(){
-  const W = 270, H = 480;
+  const H = 480;
+  let   W = 270;                // 动态逻辑宽：按容器宽高比扩展（手机短视口满宽）
   const cv = document.getElementById('game');
   const ctx = cv.getContext('2d');
   ctx.imageSmoothingEnabled = false;
+
+  // 尺寸自适应：竖屏铺满，逻辑宽按容器比例扩展（clamp 270..540）
+  function resizeCanvas(){
+    const shell = cv.parentElement;
+    const box = shell.getBoundingClientRect();
+    W = Math.max(270, Math.min(540, Math.round(H * box.width / Math.max(1, box.height))));
+    cv.width = W; cv.height = H;
+    ctx.imageSmoothingEnabled = false;
+  }
+  window.addEventListener('resize', resizeCanvas);
+  resizeCanvas();
 
   // ── 调色 ──
   const HUES = ['#3fd9c9', '#ff4d9d', '#ffd23f', '#5ee6a0'];

@@ -2212,7 +2212,7 @@ body:not(.ready) #stage {
     var stage = document.getElementById('stage');
     var fit = document.getElementById('fit');
     if (!stage || !fit) { return; }
-    var avail = Math.min(window.innerWidth - 16, DEFAULT_DIMENSIONS.width);
+    var avail = Math.min(window.innerWidth, DEFAULT_DIMENSIONS.width);
     // 下限 0.4：320px 宽的小屏手机也能整条放下（600 * 0.4 = 240 逻辑 px）
     var scale = Math.max(0.4, Math.min(1, avail / DEFAULT_DIMENSIONS.width));
     stage.style.transform = scale < 1 ? 'scale(' + scale + ')' : '';

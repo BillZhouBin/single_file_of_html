@@ -30,12 +30,20 @@
 
   #game {
     position: relative;
-    width: min(100vw, 56.25vh);  /* 9:16 portrait */
-    height: min(177.78vw, 100vh);
+    width: 100vw;                /* 手机竖屏铺满（动态逻辑宽适配，无黑边） */
+    height: 100vh;
+    height: 100dvh;
     background: linear-gradient(180deg, #7a0f12, #e85d2a);
-    border-radius: min(2.5vw, 2.5vh);
-    box-shadow: 0 20px 60px rgba(0,0,0,0.45);
     overflow: hidden;
+  }
+  /* 桌面/横屏：保持 9:16 居中列卡片观感 */
+  @media (min-aspect-ratio: 3/4) {
+    #game {
+      width: min(100vw, 56.25vh);
+      height: min(177.78vw, 100vh);
+      border-radius: min(2.5vw, 2.5vh);
+      box-shadow: 0 20px 60px rgba(0,0,0,0.45);
+    }
   }
 
   canvas { display: block; width: 100%; height: 100%; }
@@ -231,12 +239,21 @@
 <script>
 "use strict";
 
-const W = 540, H = 960;
+const H = 960;
+let   W = 540;                        // 动态逻辑宽：按容器宽高比扩展（手机短视口满宽）
 const c = document.getElementById('c');
 const ctx = c.getContext('2d');
 const dpr = Math.min(window.devicePixelRatio || 1, 2);
-c.width = W * dpr; c.height = H * dpr;
-ctx.scale(dpr, dpr);
+
+// 尺寸自适应：容器竖屏铺满（桌面媒体查询保持居中列），逻辑宽按容器比例扩展
+function resizeCanvas(){
+  const box = document.getElementById('game').getBoundingClientRect();
+  W = Math.max(540, Math.min(1080, Math.round(H * box.width / Math.max(1, box.height))));
+  c.width = W * dpr; c.height = H * dpr;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+window.addEventListener('resize', resizeCanvas);
+resizeCanvas();
 
 // roundRect 兼容（部分老旧 webview 未实现）
 if (typeof CanvasRenderingContext2D !== 'undefined' && !CanvasRenderingContext2D.prototype.roundRect) {
