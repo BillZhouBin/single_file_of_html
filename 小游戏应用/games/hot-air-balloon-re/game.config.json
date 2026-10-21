@@ -1,0 +1,13 @@
+{
+  "id": "hot-air-balloon-re",
+  "title": "热气球复刻版",
+  "source": "hot-air-balloon-re/hot-air-balloon.html",
+  "orientation": "portrait",
+  "appid": {
+    "wechat": "wx_REPLACE_ME",
+    "douyin": "tt_REPLACE_ME",
+    "alipay": "REPLACE_ME",
+    "jd": "jd_REPLACE_ME"
+  },
+  "notes": "热气球复刻版（原热气球大冒险的进阶版）的小游戏接入配置。appid 需替换为各平台开发者后台申请到的真实值。"
+}

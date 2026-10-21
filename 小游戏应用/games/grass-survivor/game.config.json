@@ -1,0 +1,13 @@
+{
+  "id": "grass-survivor",
+  "title": "一骑当千",
+  "source": "grass-survivor/grass-survivor-game.html",
+  "orientation": "landscape",
+  "appid": {
+    "wechat": "wx_REPLACE_ME",
+    "douyin": "tt_REPLACE_ME",
+    "alipay": "REPLACE_ME",
+    "jd": "jd_REPLACE_ME"
+  },
+  "notes": "一骑当千 的小游戏接入配置。appid 需替换为各平台开发者后台申请到的真实值。"
+}

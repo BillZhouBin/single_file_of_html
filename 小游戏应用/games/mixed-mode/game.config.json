@@ -1,0 +1,13 @@
+{
+  "id": "mixed-mode",
+  "title": "无限竞速混合",
+  "source": "mixed-mode/mixed-mode.html",
+  "orientation": "portrait",
+  "appid": {
+    "wechat": "wx_REPLACE_ME",
+    "douyin": "tt_REPLACE_ME",
+    "alipay": "REPLACE_ME",
+    "jd": "jd_REPLACE_ME"
+  },
+  "notes": "无限竞速混合 的小游戏接入配置。appid 需替换为各平台开发者后台申请到的真实值。"
+}

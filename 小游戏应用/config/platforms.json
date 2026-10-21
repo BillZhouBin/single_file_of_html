@@ -1,0 +1,94 @@
+{
+  "$comment": "四平台能力矩阵。事实来源见 docs/platform-research.md。build.js 与 runtime 均以此表为准，禁止在代码里硬编码平台差异。",
+  "version": "1.0.0",
+  "platforms": {
+    "wechat": {
+      "label": "微信小游戏",
+      "ns": "wx",
+      "configFile": "game.json",
+      "projectConfig": "project.config.json",
+      "subPackageDir": "",
+      "capabilities": {
+        "webAudio": { "supported": true, "factory": "createWebAudioContext", "minBaseLib": "2.19.0" },
+        "offscreenCanvas": { "supported": true, "factory": "createCanvas", "note": "首次调用返回上屏 canvas，第二次起返回离屏 canvas" },
+        "storage": { "sync": true, "async": true, "limitMB": 10 },
+        "touch": true,
+        "vibrate": true,
+        "orientation": { "supported": true, "api": "setDeviceOrientation", "minBaseLib": "2.4.0" }
+      },
+      "limits": { "mainPackageMB": 4, "subPackageTotalMB": 20 },
+      "notes": [
+        "createWebAudioContext 需基础库 2.19.0+，低版本必须降级为静音（不可崩溃）。",
+        "上屏 canvas 只能有一个：必须首次调用 createCanvas() 拿到上屏 canvas。"
+      ]
+    },
+    "douyin": {
+      "label": "抖音小游戏",
+      "ns": "tt",
+      "configFile": "game.json",
+      "projectConfig": "project.config.json",
+      "subPackageDir": "",
+      "capabilities": {
+        "webAudio": { "supported": true, "factory": "getAudioContext", "minBaseLib": "1.34.0" },
+        "offscreenCanvas": { "supported": true, "factory": "createCanvas" },
+        "storage": { "sync": true, "async": true },
+        "touch": true,
+        "vibrate": true,
+        "orientation": { "supported": true, "api": "setDeviceOrientation" }
+      },
+      "limits": { "mainPackageMB": 4, "subPackageTotalMB": 20 },
+      "notes": [
+        "WebAudio 走 tt.getAudioContext()（同步返回），与微信的 createWebAudioContext 命名不同。",
+        "AudioContext 按 W3C Web Audio 实现，createOscillator/createGain/createBiquadFilter 可用。"
+      ]
+    },
+    "alipay": {
+      "label": "支付宝小游戏",
+      "ns": "my",
+      "configFile": "game.json",
+      "projectConfig": "mini.app.json",
+      "subPackageDir": "",
+      "capabilities": {
+        "webAudio": { "supported": false, "factory": null, "fallback": "silent" },
+        "offscreenCanvas": { "supported": true, "factory": "createCanvasContext", "legacyOnly": true },
+        "storage": { "sync": true, "async": true },
+        "touch": true,
+        "vibrate": true,
+        "orientation": { "supported": false }
+      },
+      "limits": { "mainPackageMB": 4, "subPackageTotalMB": 20 },
+      "notes": [
+        "【关键差异】官方小游戏 API 总览的音频能力仅有 my.createInnerAudioContext（播 mp3），无 WebAudio 合成接口。",
+        "因此程序化合成音效（Web Audio）在支付宝端必须降级为静音，或改为预渲染音频文件 + InnerAudioContext 播放。",
+        "官方提供 adaptor.js 用于抹平 H5/小游戏差异，官方文档明示 my.createCanvasContext 首次创建上屏 canvas、第二次起为离屏。",
+        "无 setDeviceOrientation，横竖屏需按设计固定。"
+      ]
+    },
+    "jd": {
+      "label": "京东小游戏",
+      "ns": "jd",
+      "configFile": "game.json",
+      "projectConfig": "project.config.json",
+      "subPackageDir": "",
+      "capabilities": {
+        "webAudio": { "supported": "unknown", "factory": "createWebAudioContext", "probe": true },
+        "offscreenCanvas": { "supported": "unknown", "factory": "createCanvas", "probe": true },
+        "storage": { "sync": true, "async": true },
+        "touch": true,
+        "vibrate": true,
+        "orientation": { "supported": "unknown", "probe": true }
+      },
+      "limits": { "mainPackageMB": 4, "subPackageTotalMB": 16 },
+      "notes": [
+        "京东小游戏容器与微信小游戏同源，API 命名对齐 jd.*，但公开文档对 WebAudio / 离屏 canvas 未明确说明。",
+        "因此本平台所有增强能力一律走运行时探测（probe），探测失败即降级，禁止假定可用。",
+        "平台处于邀请制，需在京东开放平台申请接入资格。"
+      ]
+    }
+  },
+  "common": {
+    "noDOM": "四平台均无 document/window DOM，DOM UI 必须由 canvas 渲染。",
+    "noExternalURL": "小游戏包内禁止外链资源，字体/图片必须内嵌或改用 Canvas 绘制。",
+    "touchFirst": "四平台均为触屏设备，键盘输入一律为可选增强路径。"
+  }
+}
