@@ -7,7 +7,7 @@
  *
  * 用法：node tools/smoke-start.js [游戏相对路径...]
  *   例：node tools/smoke-start.js                    # 跑全部
- *       node tools/smoke-start.js rabbit-racing/rabbit-racing-game.html
+ *       node tools/smoke-start.js snack-adventure/snack-adventure-game.html
  */
 'use strict';
 const fs = require('fs');

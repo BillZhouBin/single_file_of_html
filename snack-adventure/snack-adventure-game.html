@@ -1138,6 +1138,45 @@ function spawnItems(){
 }
 
 /* ==========================================================================
+   10.5 混合模式挑战钩子
+   仅当 URL 带 ?challenge= 时生效：无参数时所有修正量保持中性，
+   开场页 / 规则页 / 教程页与常规玩法完全不变。
+   与 mixed-mode 的契约：进关读 challenge/mod，达标或失败写 mm_result 后跳回。
+   ========================================================================== */
+const CH = (function(){
+  try{
+    const q = new URLSearchParams(location.search);
+    const c = q.get('challenge');
+    return c ? {ch:c, mod:q.get('mod')} : null;
+  }catch(e){ return null; }
+})();
+const CHAL = { sa_coins:{ target:25, label:'吃金币', kind:'coins' } };
+let challenge = null, speedMul = 1, coinWinMul = 1, coneWinMul = 1, shield = 0, coinsGot = 0;
+
+function applyMod(){
+  speedMul = 1; coinWinMul = 1; coneWinMul = 1; shield = 0;
+  if(!CH) return;
+  switch(CH.mod){
+    case 'sa_slow':   speedMul = 0.8;    break;   // 推进降速（buff）
+    case 'sa_fast':   speedMul = 1.25;   break;   // 推进提速（debuff）
+    case 'sa_wide':   coinWinMul = 1.45; break;   // 金币判定放宽（buff）
+    case 'sa_tight':  coinWinMul = 0.7;  break;   // 金币判定收窄（debuff）
+    case 'sa_shield': shield = 1;        break;   // 护盾抵消一次撞击（buff）
+    case 'sa_heavy':  coneWinMul = 1.45; break;   // 雪糕筒判定放宽，更易撞（debuff）
+  }
+}
+
+function mmReport(result, gain){
+  const payload = { result:result, gain:gain||0 };
+  try{
+    const S = window.SharedGame;
+    if(S && S.Store) S.Store.setJSON('mm_result', payload);
+    else localStorage.setItem('mm_result', JSON.stringify(payload));
+  }catch(e){}
+  location.href = '../mixed-mode/mixed-mode.html';
+}
+
+/* ==========================================================================
    11. 游戏状态机
    ========================================================================== */
 const ST = {LOAD:'load', START:'start', RULES:'rules', TUTOR:'tutor', COUNT:'count',
@@ -1171,6 +1210,9 @@ function resetRun(){
   G.flash=0; G.shake=0;
   scrollZ=0; particles.length=0;
   items.length=0;
+  /* 挑战态在每局开局重置：修正量只在本局内生效 */
+  coinsGot = 0;
+  if(CH){ applyMod(); challenge = CHAL[CH.ch] || null; } else { challenge = null; }
   initProps();
   spawnItems();
 }
@@ -1232,6 +1274,7 @@ function endRun(reason){
     if(S && S.Store) S.Store.set(BEST_KEY, String(G.best));
     else localStorage.setItem(BEST_KEY, String(G.best));
   }catch(e){}
+  if(CH){ mmReport('lose'); return; }   // 挑战局失败：直接回报并退回混合模式
   G.rank = rankFor(G.score);
   G.reward = rewardFor(G.score);
   state = ST.OVER; stateT = 0;
@@ -1293,7 +1336,11 @@ function update(dt){
   for(let i=particles.length-1;i>=0;i--) if(particles[i].life<=0) particles.splice(i,1);
 
   if(state===ST.LOAD){
-    if(stateT>0.9){ state=ST.START; stateT=0; }
+    if(stateT>0.9){
+      /* 混合模式进入时跳过开场/规则/教程，直接进倒计时 */
+      if(CH) startCountdown();
+      else { state=ST.START; stateT=0; }
+    }
     return;
   }
   if(state===ST.COUNT){
@@ -1312,7 +1359,7 @@ function update(dt){
   }
 
   // ---- 进行中 ----
-  G.speed = START_SPEED + (ROUND_TIME-G.timeLeft)*SPEED_GAIN;
+  G.speed = (START_SPEED + (ROUND_TIME-G.timeLeft)*SPEED_GAIN) * speedMul;
   const sp = G.speed;
   scrollZ += sp*dt;
 
@@ -1333,8 +1380,9 @@ function update(dt){
     it.z -= sp*dt;
     if(it.z < Z_NEAR-0.6){ items.splice(i,1); continue; }
     if(it.dead) continue;
-    // 碰撞：同一车道且 z 接近玩家
-    if(it.lane===G.lane && Math.abs(it.z-playerZ)<0.42){
+    // 碰撞：同一车道且 z 接近玩家（混合模式下按 buff/debuff 调整判定宽度）
+    const hitWin = it.type==='coin' ? 0.42*coinWinMul : 0.42*coneWinMul;
+    if(it.lane===G.lane && Math.abs(it.z-playerZ)<hitWin){
       const iy = gY(it.z);
       if(it.type==='coin'){
         it.dead = true;
@@ -1342,6 +1390,11 @@ function update(dt){
         G.score += add;
         sfx.coin();
         burst(it.lane, it.z, 'coin', add);
+        coinsGot++;
+        if(challenge && challenge.kind==='coins' && coinsGot>=challenge.target){
+          mmReport('win', 120);
+          return;
+        }
       } else if(it.type==='can'){
         it.dead = true;
         G.boost = BOOST_TIME;
@@ -1351,6 +1404,7 @@ function update(dt){
         sfx.crash();
         G.shake = 1;
         burst(it.lane, it.z, 'crash', 0);
+        if(shield>0){ shield--; it.dead = true; continue; }   // 护盾抵消一次撞击
         endRun('crash');
         return;
       }
@@ -1490,6 +1544,13 @@ function drawHUD(){
   const mm = Math.floor(ts/60), ss = Math.floor(ts%60);
   txt(ctx,(mm<10?'0':'')+mm+':'+(ss<10?'0':'')+ss, 172,184,31,'#FFFFFF','800',
       {align:'right',stroke:'rgba(28,86,120,0.55)',sw:4});
+
+  // 混合模式挑战进度（仅带 ?challenge= 时出现）
+  if(challenge){
+    const done = Math.min(coinsGot, challenge.target);
+    txt(ctx, challenge.label+' '+done+'/'+challenge.target, 320, 270, 26, '#FFFFFF', '800',
+        {stroke:'rgba(20,40,70,0.55)', sw:5});
+  }
 
   // 返回 / 声音
   ctx.save();

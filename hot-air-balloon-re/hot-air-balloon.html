@@ -280,6 +280,44 @@ var G = {
 var BEST_KEY = 'hot_air_balloon_best_v1';
 try { G.best = parseInt(localStorage.getItem(BEST_KEY) || '0', 10) || 0; } catch (e) { G.best = 0; }
 
+/* ---------------- 混合模式挑战钩子 ----------------
+   仅当 URL 带 ?challenge= 时生效；无参数时所有修正保持中性，原玩法完全不变。
+   与 mixed-mode 的契约：进关读 challenge/mod，达标或失败写 mm_result 后跳回。 */
+var CH = (function () {
+  try {
+    var q = new URLSearchParams(location.search);
+    var c = q.get('challenge');
+    return c ? { ch: c, mod: q.get('mod') } : null;
+  } catch (e) { return null; }
+})();
+var CHAL = { hb2_bubbles: { target: 12, label: '收集气泡', kind: 'bubbles' } };
+var challenge = null, speedMul = 1, boardWidthMul = 1, immuneBonus = 0, bubblesGot = 0;
+
+function applyMod() {
+  speedMul = 1; boardWidthMul = 1; immuneBonus = 0;
+  if (!CH) return;
+  switch (CH.mod) {
+    case 'hb2_slow':   speedMul = 0.8;      break;   // 板速降低（buff）
+    case 'hb2_fast':   speedMul = 1.25;     break;   // 板速提高（debuff）
+    case 'hb2_wide':   boardWidthMul = 0.8; break;   // 板变窄，通道更宽（buff）
+    case 'hb2_narrow': boardWidthMul = 1.25;break;   // 板变宽，通道更窄（debuff）
+    case 'hb2_inv':    immuneBonus = 2;     break;   // 无敌延长 2s（buff）
+    case 'hb2_inv-':   immuneBonus = -1;    break;   // 无敌缩短 1s（debuff）
+  }
+}
+
+function mmReport(result, gain) {
+  var payload = { result: result, gain: gain || 0 };
+  try {
+    if (typeof SharedGame !== 'undefined' && SharedGame.Store) {
+      SharedGame.Store.setJSON('mm_result', payload);
+    } else {
+      localStorage.setItem('mm_result', JSON.stringify(payload));
+    }
+  } catch (e) {}
+  location.href = '../mixed-mode/mixed-mode.html';
+}
+
 /* ---- 计分：两个通道之和（由录像两局分数曲线逐帧解码后归因得出）----
    时间分  DP(τ) = floor(SCORE_C · τ^SCORE_P)，τ = 本局游戏秒数 + SCORE_TAU0
            录像中的「跳分」并非按滚动距离触发，而与游戏时间的高次曲线吻合
@@ -329,6 +367,9 @@ function resetRun() {
   G.puTimer = PU_FIRST_MIN + Math.random() * (PU_FIRST_MAX - PU_FIRST_MIN);
   G.immune = 0; G.gorePhase = 0; G.shake = 0;
   G.ballX = W / 2; G.targetX = W / 2;
+  /* 挑战态在每局开局重置：修正量只在本局内生效 */
+  bubblesGot = 0;
+  if (CH) { applyMod(); challenge = CHAL[CH.ch] || null; } else { challenge = null; }
 }
 
 /* 准备界面的装饰板与装饰气泡（取自录像 t=6.5s 静止画面，640 制版坐标）
@@ -367,7 +408,7 @@ function pickWidth() {
 }
 
 function spawnBoardRow() {
-  var w = pickWidth();
+  var w = pickWidth() * boardWidthMul;   // 混合模式修正：窄板=更容易穿过
   var overhang = 60;                        // 允许伸出屏幕外
   var minVis = Math.min(UNIT * 1.5, w);     // 至少露出 1.5 格，避免"看不见却占一行"
   var needGap = BALL_RX * 2 + 60;           // 必须留出比气球宽裕的连续通道
@@ -427,7 +468,7 @@ function update(dt) {
   G.time += dt;
   if (G.immune > 0) G.gorePhase += dt;   // 三色气囊只在无敌期间轮转
 
-  var speed = Math.min(BASE_SPEED + SPEED_RAMP * G.time, SPEED_CAP);
+  var speed = Math.min(BASE_SPEED + SPEED_RAMP * G.time, SPEED_CAP) * speedMul;
   var dy = speed * dt;
   G.scroll += dy;
 
@@ -482,6 +523,11 @@ function update(dt) {
       G.bubbles.splice(i, 1);
       addPickScore(BUBBLE_POINT);
       G.poppers.push({ x: e.x, y: e.y, t: 0 });
+      bubblesGot++;
+      if (challenge && challenge.kind === 'bubbles' && bubblesGot >= challenge.target) {
+        mmReport('win', 120);
+        return;
+      }
     }
   }
 
@@ -493,7 +539,7 @@ function update(dt) {
     if (e.y > H + 40) { G.powerups.splice(i, 1); continue; }
     if (ellipseHitsCircle(G.ballX, BALL_Y, BALL_RX, BALL_RY, e.x, e.y, 17)) {
       G.powerups.splice(i, 1);
-      G.immune = IMMUNE_TIME;
+      G.immune = Math.max(0.5, IMMUNE_TIME + immuneBonus);
       G.gorePhase = 0;                       // 录像实测：彩虹必从「蓝红黄」起
       G.poppers.push({ x: e.x, y: e.y, t: 0, big: true });
     }
@@ -528,6 +574,7 @@ function die() {
     G.best = G.score;
     try { localStorage.setItem(BEST_KEY, String(G.best)); } catch (e) {}
   }
+  if (CH) { mmReport('lose'); return; }   // 挑战局失败：直接回报并退回混合模式
 }
 
 /* ---------------- 绘制 ---------------- */
@@ -599,6 +646,11 @@ function drawHUD() {
     ctx.fillStyle = COL.ink;
     ctx.fillRect(PAUSE_X, PAUSE_Y, PAUSE_W, PAUSE_H);
     ctx.fillRect(PAUSE_X + PAUSE_GAP, PAUSE_Y, PAUSE_W, PAUSE_H);
+  }
+  /* 挑战进度横幅：仅在混合模式进入时出现 */
+  if (challenge) {
+    drawText(challenge.label + ' ' + Math.min(bubblesGot, challenge.target) + '/' + challenge.target,
+      W / 2, 42, 15, COL.hud, 'center');
   }
 }
 
