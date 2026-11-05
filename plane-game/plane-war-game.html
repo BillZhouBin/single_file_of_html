@@ -142,6 +142,28 @@
   .redflash{position:absolute; inset:0; z-index:9; background:var(--ui-danger); opacity:0; pointer-events:none;}
   .redflash.hit{animation:hit .3s ease-out;}
   @keyframes hit{0%{opacity:.5;}100%{opacity:0;}}
+  /* ============================================================
+     Mobile-first UI v2 · 覆盖层触控 / 安全区 / 焦点规范
+     仅叠加最小尺寸与安全区，保留本作原有调色板、像素字体与面板造型
+     ============================================================ */
+  :root { --font-cn:'Noto Sans SC',-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',system-ui,sans-serif; }
+  .hub-back { display:none; }
+  button:focus-visible, a:focus-visible { outline:3px solid #9be7ff; outline-offset:3px; }
+  @media (max-width:720px) {
+    .overlay { padding:16px; padding-bottom:calc(16px + env(safe-area-inset-bottom, 0px)); }
+    .overlay .btn { min-height:48px; }
+    .overlay .btn-row { gap:10px; }
+    .hub-back {
+      display:inline-flex; align-items:center; justify-content:center;
+      position:absolute; left:50%; transform:translateX(-50%);
+      bottom:calc(10px + env(safe-area-inset-bottom, 0px)); z-index:31;
+      min-height:44px; padding:0 16px;
+      font-family:var(--font-cn); font-size:13px; font-weight:500;
+      text-decoration:none; color:#e6e9f5;
+      background:rgba(18,22,52,.88); border:1px solid #2a2f5e; border-radius:22px;
+    }
+  }
+  .overlay.hidden .hub-back { visibility:hidden; }
 </style>
 </head>
 <body>
@@ -161,6 +183,7 @@
 
     <!-- 主菜单 -->
     <div class="overlay" id="menu">
+      <a class="hub-back" href="../index.html">← 返回合集</a>
       <div class="logo">PIXEL<br>WAR<small>像素飞机大战</small></div>
       <div class="btn-row">
         <button class="btn btn--primary" id="startBtn">开始游戏</button>

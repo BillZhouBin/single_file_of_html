@@ -175,6 +175,28 @@
   @media (prefers-reduced-motion: reduce) {
     .overlay, .toast, .btn { transition: none !important; }
   }
+  /* ============================================================
+     Mobile-first UI v2 · 覆盖层触控 / 安全区 / 焦点规范
+     仅叠加最小尺寸与安全区，保留本作原有调色板、像素字体与面板造型
+     ============================================================ */
+  :root { --font-cn:'Noto Sans SC',-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',system-ui,sans-serif; }
+  .hub-back { display:none; }
+  button:focus-visible, a:focus-visible { outline:3px solid #ffd23f; outline-offset:3px; }
+  @media (max-width:720px) {
+    .overlay { padding:16px; padding-bottom:calc(16px + env(safe-area-inset-bottom, 0px)); }
+    .overlay .btn { min-height:48px; }
+    .overlay .btn-row { gap:10px; }
+    .hub-back {
+      display:inline-flex; align-items:center; justify-content:center;
+      position:absolute; left:50%; transform:translateX(-50%);
+      bottom:calc(10px + env(safe-area-inset-bottom, 0px)); z-index:31;
+      min-height:44px; padding:0 16px;
+      font-family:var(--font-cn); font-size:13px; font-weight:500;
+      text-decoration:none; color:#4a2400;
+      background:rgba(255,230,191,.94); border:1px solid #b8932a; border-radius:22px;
+    }
+  }
+  .overlay.hidden .hub-back { visibility:hidden; }
 </style>
 </head>
 <body>
@@ -194,6 +216,7 @@
 
   <!-- Menu -->
   <div class="overlay" id="menu">
+    <a class="hub-back" href="../index.html">← 返回合集</a>
     <div class="menu-title">聚宝盆</div>
     <div class="menu-sub">拖动聚宝盆 · 接住元宝 · 躲开炸弹</div>
     <div class="card">

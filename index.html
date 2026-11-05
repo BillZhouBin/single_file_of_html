@@ -2,12 +2,34 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>单文件小游戏合集 · Single-File HTML Games</title>
 <meta name="description" content="零构建、零依赖的纯前端像素小游戏集合。每个游戏都是自包含的 HTML 文件，双击即玩。">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap" rel="stylesheet">
+<link id="pixelFonts" href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap" rel="stylesheet">
+<script>
+/* 字体加载态：仅增强，不阻断内容。默认全部可见，任何异常都在 1.2s 内回落到正常态。 */
+(function () {
+  var d = document.documentElement;
+  if (!('fonts' in document)) return;
+  d.classList.add('ui-loading');
+  var done = false;
+  function finish() {
+    if (done) return; done = true;
+    d.classList.remove('ui-loading');
+    try {
+      var ok = false;
+      document.fonts.forEach(function (f) {
+        if (f.family.indexOf('Press Start 2P') >= 0 && f.status === 'loaded') ok = true;
+      });
+      if (!ok) d.classList.add('ui-font-fail');
+    } catch (e) {}
+  }
+  document.fonts.ready.then(finish);
+  setTimeout(finish, 1200);
+})();
+</script>
 <style>
   :root {
     /* Color tokens — 与 plane-war-game 调色板对齐 */
@@ -208,25 +230,270 @@
     * { transition: none !important; }
     .topbar .dot, .badge .b-dot { box-shadow: none !important; }
   }
+
+  /* ============================================================
+     Mobile-first UI v2 · 移动端优先重设计
+     原则：① 桌面 960px 栅格 / hover / focus-visible / 游戏入口全部保留；
+           ② 所有隐藏与折叠默认关闭，脚本失效时页面依旧完整可玩；
+           ③ 中文字体改用系统中文栈，像素展示体只留给英文短标签与数字。
+     ============================================================ */
+  :root {
+    --font-cn: 'Noto Sans SC', -apple-system, BlinkMacSystemFont, 'PingFang SC',
+               'Hiragino Sans GB', 'Microsoft YaHei', system-ui, sans-serif;
+    --safe-b: env(safe-area-inset-bottom, 0px);
+  }
+  [hidden] { display: none !important; }
+
+  body {
+    font-family: var(--font-cn);
+    font-size: 14px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  .topbar-inner { font-size: 10px; }
+  .topnav { margin-left: auto; display: flex; align-items: center; gap: 24px; }
+  .topnav a {
+    font-family: var(--font-cn); font-size: 13px; font-weight: 500;
+    color: var(--text-dim); text-decoration: none;
+  }
+  .topnav a:hover, .topnav a.is-active { color: var(--gold); }
+
+  .hero { margin-bottom: 32px; }
+  .hero h1 {
+    font-family: var(--font-cn); font-weight: 800;
+    font-size: clamp(26px, 3.2vw, 34px); line-height: 1.3;
+    letter-spacing: .01em; text-shadow: none;
+  }
+  .hero p { font-size: 14px; line-height: 1.65; }
+  .section-title { font-family: var(--font-cn); font-size: 14px; font-weight: 700; letter-spacing: .02em; }
+  .section-title > span:first-child { order: 0; }
+  .section-title::after { order: 1; }
+  .section-count {
+    order: 2; font-family: var(--font-cn); font-size: 12px; font-weight: 400;
+    color: var(--text-dim); white-space: nowrap;
+  }
+
+  .grid { gap: 20px; }
+  .card { padding: 20px; gap: 12px; border-width: 1px; border-radius: 12px; }
+  .card-head { gap: 12px; flex-wrap: wrap; }
+  .sprite { width: 48px; height: 48px; border-width: 1px; border-radius: 10px; }
+  .sprite svg { width: 36px; height: 36px; }
+  .card h3 {
+    font-family: var(--font-cn); font-size: 17px; font-weight: 700;
+    line-height: 1.4; margin: 0 0 6px;
+  }
+  .tag {
+    font-family: var(--font-cn); font-size: 12px; font-weight: 500;
+    border-radius: 6px; padding: 3px 8px;
+  }
+  .card p {
+    font-size: 13px; line-height: 1.6;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  }
+  .badge, .recent-label { font-family: var(--font-cn); font-size: 12px; font-weight: 600; }
+  .recent-label { order: 0; }
+  .play-btn {
+    font-family: var(--font-cn); font-size: 15px; font-weight: 700;
+    min-height: 44px; padding: 10px 16px; border-radius: 10px;
+  }
+  /* 去重：每张卡的「在线试玩」指向同一目标，域名入口统一收敛到 footer */
+  .play-hint { display: none; }
+  .card--soon { opacity: 1; }
+  .card--soon h3, .card--soon p, .card--soon .tag { color: var(--text-dim); }
+
+  /* 混合模式主推入口 */
+  .mix-entry {
+    display: flex; align-items: center; gap: 16px;
+    max-width: 620px; margin: 0 auto 32px; padding: 16px 20px;
+    background: var(--bg-panel-2); border: 2px solid var(--gold); border-radius: 12px;
+    color: var(--text); text-decoration: none;
+    transition: transform 200ms ease, box-shadow 200ms ease;
+  }
+  .mix-entry:hover { transform: translateY(-2px); box-shadow: 0 10px 24px -12px rgba(255,210,63,.5); }
+  .mix-entry .me-icon {
+    width: 44px; height: 44px; flex: none; display: grid; place-items: center;
+    background: var(--bg-panel); border-radius: 10px; font-size: 22px;
+  }
+  .mix-entry .me-text { flex: 1; display: flex; flex-direction: column; gap: 4px; }
+  .mix-entry strong { font-size: 16px; color: var(--gold); }
+  .mix-entry small { font-size: 12px; color: var(--text-dim); }
+  .mix-entry .me-arrow { color: var(--gold); font-size: 20px; }
+
+  /* 通用按钮组件（空状态 / 系统反馈） */
+  .ui-btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+    min-height: 48px; padding: 10px 16px; border-radius: 10px;
+    font-family: var(--font-cn); font-size: 15px; font-weight: 700;
+    text-decoration: none; cursor: pointer;
+    border: 2px solid var(--line); background: transparent; color: var(--text);
+  }
+  .ui-btn--primary { background: var(--gold); border-color: #b8932a; color: #1a0e0c; }
+  .ui-btn--ghost { min-height: 44px; font-size: 14px; font-weight: 500; }
+  .ui-btn:hover { border-color: var(--cyan); }
+
+  /* 展开其余游戏（默认隐藏，脚本在窄屏接管） */
+  .grid-more {
+    display: none; width: 100%; min-height: 48px; margin-top: 12px;
+    align-items: center; justify-content: center;
+    background: transparent; border: 2px solid var(--line); border-radius: 10px;
+    font-family: var(--font-cn); font-size: 14px; font-weight: 500;
+    color: var(--text); cursor: pointer;
+  }
+  .grid-more:hover { border-color: var(--cyan); }
+
+  /* 加载骨架屏：只在字体未就绪时出现，1.2s 兜底退出 */
+  .skeleton-grid { display: none; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 20px; }
+  .ui-loading .skeleton-grid { display: grid; }
+  .ui-loading #gamesGrid, .ui-loading .grid-more { display: none; }
+  .sk-card {
+    min-height: 200px; padding: 16px; display: flex; flex-direction: column; gap: 12px;
+    background: var(--bg-panel); border: 1px solid var(--line); border-radius: 12px;
+  }
+  .sk { background: var(--bg-panel-2); border-radius: 6px; animation: sk-pulse 1.2s ease-in-out infinite; }
+  .sk--icon { width: 48px; height: 48px; border-radius: 10px; }
+  .sk--title { width: 60%; height: 14px; }
+  .sk--line { width: 100%; height: 14px; }
+  .sk--line.short { width: 72%; }
+  .sk--btn { width: 100%; height: 48px; margin-top: auto; border-radius: 10px; }
+  @keyframes sk-pulse { 0%, 100% { opacity: .5; } 50% { opacity: 1; } }
+
+  /* 字体加载失败 / 离线降级：不阻断任何游戏入口 */
+  .font-warn { display: none; }
+  .ui-font-fail .font-warn:not(.is-dismissed) {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 8px; align-items: center;
+    padding: 10px 16px; background: #2a1620; border-bottom: 1px solid var(--coral);
+    font-size: 12px; line-height: 1.5; color: #ff8a94;
+  }
+  .font-warn span { grid-column: 1 / -1; }
+  .font-warn button {
+    min-height: 44px; padding: 0 12px; display: inline-flex; align-items: center;
+    background: transparent; border: 1px solid var(--coral); border-radius: 8px;
+    font-family: var(--font-cn); font-size: 12px; color: #ff8a94; cursor: pointer;
+  }
+
+  /* 最近游玩视图与空状态 */
+  .recent-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 20px; }
+  .empty-state {
+    max-width: 420px; margin: 24px auto; padding: 32px 24px;
+    display: flex; flex-direction: column; align-items: center; gap: 12px;
+    text-align: center; background: var(--bg-panel);
+    border: 1px solid var(--line); border-radius: 12px;
+  }
+  .empty-state svg { width: 96px; height: 96px; }
+  .empty-state h3 { margin: 0; font-size: 17px; }
+  .empty-state p { margin: 0 0 8px; font-size: 13px; line-height: 1.6; color: var(--text-dim); }
+  .empty-actions { width: 100%; display: flex; flex-direction: column; gap: 10px; }
+  .empty-actions .ui-btn { width: 100%; }
+
+  /* 底部胶囊导航：默认隐藏，脚本初始化成功后才出现，避免无效占位按钮 */
+  .tabbar { display: none; }
+
+  a:focus-visible, button:focus-visible, .play-btn:focus-visible, summary:focus-visible {
+    outline: 3px solid var(--cyan); outline-offset: 3px;
+  }
+
+  @media (min-width: 721px) {
+    /* 桌面：只升级排版与字号，960px 容器与三列栅格保持不变 */
+    .card p { -webkit-line-clamp: 3; }
+  }
+
+  @media (max-width: 720px) {
+    .topbar-inner { padding: 12px 20px; }
+    .topnav { display: none; }
+    .container { padding: 24px 20px; }
+    .hero { text-align: left; margin-bottom: 24px; }
+    .hero h1 { font-size: 26px; line-height: 1.35; }
+    .hero p { font-size: 13px; }
+    .mix-entry { margin-bottom: 24px; padding: 14px 16px; }
+    .mix-entry strong { font-size: 15px; }
+    .section-title { margin-bottom: 16px; }
+    .grid, .recent-list { grid-template-columns: 1fr; gap: 12px; }
+    .skeleton-grid { grid-template-columns: 1fr; gap: 12px; }
+    .card { padding: 16px; gap: 12px; }
+    .play-btn { min-height: 48px; }
+    .grid.is-collapsed .card:nth-child(n+4) { display: none; }
+    .grid-more { display: flex; }
+    #viewGames, #viewRecent { padding-bottom: calc(92px + var(--safe-b)); }
+    footer { padding: 20px 16px calc(96px + var(--safe-b)); margin-top: 24px; }
+    .tabbar {
+      display: block; position: fixed; z-index: 60;
+      left: 16px; right: 16px; bottom: calc(12px + var(--safe-b));
+      padding: 4px; background: rgba(18,22,52,.96);
+      border: 1px solid var(--line); border-radius: 36px;
+      box-shadow: 0 12px 32px -12px rgba(0,0,0,.8);
+      -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
+    }
+    .tabbar-inner { display: flex; gap: 4px; }
+    .tab {
+      flex: 1; min-height: 54px; display: flex; flex-direction: column;
+      align-items: center; justify-content: center; gap: 4px;
+      border: 0; border-radius: 26px; background: transparent;
+      font-family: var(--font-cn); font-size: 10px; font-weight: 500;
+      color: var(--text-dim); text-decoration: none; cursor: pointer;
+    }
+    .tab svg { width: 18px; height: 18px; }
+    .tab.is-active { background: var(--gold); color: #1a0e0c; font-weight: 700; }
+  }
+
+  @media (max-width: 360px) {
+    .container { padding-left: 16px; padding-right: 16px; }
+    .card-head { gap: 10px; }
+    .sprite { width: 44px; height: 44px; }
+    .card h3 { font-size: 16px; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .sk { animation: none; }
+    .mix-entry { transition: none; }
+  }
 </style>
 </head>
 <body>
+  <div class="font-warn" id="fontWarn" role="status">
+    <span>像素字体加载失败，已自动回退系统字体，游戏画面与操作不受影响。</span>
+    <button type="button" id="fontRetry">重试加载</button>
+    <button type="button" id="fontDismiss">继续离线游玩</button>
+  </div>
+
   <div class="topbar">
     <div class="topbar-inner">
       <span class="dot" aria-hidden="true"></span>
       <span>SINGLE-FILE HTML GAMES</span>
+      <nav class="topnav" aria-label="顶部导航">
+        <a class="is-active" href="#games">游戏索引</a>
+        <a href="./mixed-mode/mixed-mode.html">混合模式</a>
+      </nav>
     </div>
   </div>
 
   <main class="container">
     <section class="hero">
       <h1>单文件小游戏<span class="accent">合集</span></h1>
-      <p>零构建 · 零依赖的纯前端像素游戏。每个游戏都是一个自包含的 HTML 文件，双击即玩——没有打包、没有本地服务器、没有 npm install。</p>
+      <p>零构建 · 零依赖，双击即玩。7 款像素小游戏，键盘与触屏都能玩。</p>
     </section>
 
-    <h2 class="section-title">游戏索引 · GAME INDEX</h2>
+    <a class="mix-entry" href="./mixed-mode/mixed-mode.html">
+      <span class="me-icon" aria-hidden="true">🎯</span>
+      <span class="me-text">
+        <strong>无限竞速混合</strong>
+        <small>四款串联 · 弧形指针判定 · 无限闯关</small>
+      </span>
+      <span class="me-arrow" aria-hidden="true">→</span>
+    </a>
 
-    <section class="grid" aria-label="游戏列表">
+    <div id="viewGames">
+      <h2 class="section-title" id="games">
+        <span>游戏索引 · GAME INDEX</span>
+        <span class="section-count">7 款可玩</span>
+      </h2>
+
+      <div class="skeleton-grid" aria-hidden="true">
+        <div class="sk-card"><div class="sk sk--icon"></div><div class="sk sk--title"></div><div class="sk sk--line"></div><div class="sk sk--line short"></div><div class="sk sk--btn"></div></div>
+        <div class="sk-card"><div class="sk sk--icon"></div><div class="sk sk--title"></div><div class="sk sk--line"></div><div class="sk sk--line short"></div><div class="sk sk--btn"></div></div>
+        <div class="sk-card"><div class="sk sk--icon"></div><div class="sk sk--title"></div><div class="sk sk--line"></div><div class="sk sk--line short"></div><div class="sk sk--btn"></div></div>
+      </div>
+
+      <section class="grid" id="gamesGrid" aria-label="游戏列表">
       <!-- 像素飞机大战 -->
       <article class="card">
         <div class="card-head">
@@ -432,11 +699,53 @@
         <a class="play-btn" href="./snack-adventure/snack-adventure-game.html">▶ 开始游戏</a>
         <a class="play-hint" href="https://game.xzz.cloud-ip.cc/snack-adventure/snack-adventure-game.html" rel="noopener">↗ 在线试玩 · game.xzz.cloud-ip.cc</a>
       </article>
+      </section>
+      <button class="grid-more" id="gridMore" type="button" hidden>展开其余 4 款游戏</button>
+    </div>
+
+    <section id="viewRecent" aria-label="最近游玩" hidden>
+      <h2 class="section-title">最近游玩 · RECENT</h2>
+      <div class="recent-list" id="recentList"></div>
+      <div class="empty-state" id="recentEmpty" hidden>
+        <svg viewBox="0 0 24 24" shape-rendering="crispEdges" aria-hidden="true">
+          <rect x="3" y="7" width="18" height="13" fill="#1a1f47"/>
+          <rect x="3" y="7" width="18" height="2" fill="#2a2f5e"/>
+          <rect x="5" y="11" width="6" height="2" fill="#3a4070"/>
+          <rect x="5" y="15" width="10" height="2" fill="#3a4070"/>
+          <rect x="17" y="3" width="2" height="2" fill="#ffd23f"/>
+          <rect x="20" y="5" width="2" height="2" fill="#9be7ff"/>
+          <rect x="15" y="1" width="2" height="2" fill="#ff6b5e"/>
+        </svg>
+        <h3>还没有玩过任何游戏</h3>
+        <p>挑一款开始，这里会记录你最近打开的游戏。</p>
+        <div class="empty-actions">
+          <button class="ui-btn ui-btn--primary" id="emptyGo" type="button">去挑一款游戏</button>
+          <a class="ui-btn ui-btn--ghost" href="./mixed-mode/mixed-mode.html">打开混合模式</a>
+        </div>
+      </div>
     </section>
   </main>
 
+  <nav class="tabbar" id="tabbar" aria-label="主导航" hidden>
+    <div class="tabbar-inner">
+      <button class="tab is-active" type="button" data-view="games" aria-current="page">
+        <svg viewBox="0 0 18 18" aria-hidden="true"><rect x="2" y="2" width="6" height="6" rx="1" fill="currentColor"/><rect x="10" y="2" width="6" height="6" rx="1" fill="currentColor"/><rect x="2" y="10" width="6" height="6" rx="1" fill="currentColor"/><rect x="10" y="10" width="6" height="6" rx="1" fill="currentColor"/></svg>
+        游戏
+      </button>
+      <a class="tab" href="./mixed-mode/mixed-mode.html">
+        <svg viewBox="0 0 18 18" fill="none" aria-hidden="true"><path d="M2 13A7 7 0 0 1 16 13" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M9 13L13 5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="9" cy="13" r="1.8" fill="currentColor"/></svg>
+        混合
+      </a>
+      <button class="tab" type="button" data-view="recent">
+        <svg viewBox="0 0 18 18" fill="none" aria-hidden="true"><circle cx="9" cy="9" r="7" stroke="currentColor" stroke-width="2"/><path d="M9 5V9L12 11" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        最近
+      </button>
+    </div>
+  </nav>
+
   <footer>
-    <p>保持联网以加载像素字体（Google Fonts CDN），离线自动回退 monospace，不影响游玩。</p>
+    <p>保持联网以加载像素字体（Google Fonts CDN），离线自动回退系统字体，不影响游玩。</p>
+    <p>线上地址：<a href="https://game.xzz.cloud-ip.cc/" rel="noopener">game.xzz.cloud-ip.cc</a></p>
     <p class="sig">UI DESIGNER · 像素君</p>
   </footer>
 
@@ -478,6 +787,121 @@
       if (badge) badge.after(lab); else card.appendChild(lab);
       setInterval(function () { lab.textContent = '最近游玩 · ' + rel(ts); }, 60000);
     });
+  })();
+  </script>
+
+  <script>
+  /* Mobile-first UI v2 —— 只负责导航、折叠、最近视图与字体反馈；不触碰任何游戏逻辑 */
+  (function () {
+    'use strict';
+    var $ = function (id) { return document.getElementById(id); };
+    var grid = $('gamesGrid'), more = $('gridMore'), tabbar = $('tabbar');
+    var viewGames = $('viewGames'), viewRecent = $('viewRecent');
+    var recentList = $('recentList'), recentEmpty = $('recentEmpty');
+    if (!grid || !tabbar) return;
+
+    var cards = Array.prototype.slice.call(grid.querySelectorAll('.card'));
+    var mq = window.matchMedia ? window.matchMedia('(max-width: 720px)')
+                               : { matches: false };
+    var expanded = false;
+
+    /* 窄屏折叠：默认全部可见，脚本接管后才折叠 */
+    function applyCollapse() {
+      if (!mq.matches) {
+        grid.classList.remove('is-collapsed');
+        more.hidden = true;
+        return;
+      }
+      more.hidden = false;
+      grid.classList.toggle('is-collapsed', !expanded);
+      more.textContent = expanded ? '收起其余 4 款游戏' : '展开其余 4 款游戏';
+      more.setAttribute('aria-expanded', String(expanded));
+    }
+    more.addEventListener('click', function () { expanded = !expanded; applyCollapse(); });
+    if (mq.addEventListener) mq.addEventListener('change', applyCollapse);
+    else if (mq.addListener) mq.addListener(applyCollapse);
+
+    /* 最近游玩：复用现有 gamehub.last.* 时间戳，不新增存储键 */
+    function idFromHref(h) { var m = h && h.match(/\.\/([^/]+)\//); return m ? m[1] : null; }
+    function rel(ts) {
+      var s = Math.floor((Date.now() - ts) / 1000);
+      if (s < 60) return '刚刚';
+      if (s < 3600) return Math.floor(s / 60) + ' 分钟前';
+      if (s < 86400) return Math.floor(s / 3600) + ' 小时前';
+      return Math.floor(s / 86400) + ' 天前';
+    }
+    function stamp(card) {
+      var a = card.querySelector('a.play-btn'), id = idFromHref(a && a.getAttribute('href'));
+      if (!id) return 0;
+      try { return parseInt(localStorage.getItem('gamehub.last.' + id) || '0', 10) || 0; }
+      catch (e) { return 0; }
+    }
+    function record(a) {
+      var id = idFromHref(a.getAttribute('href'));
+      if (id) { try { localStorage.setItem('gamehub.last.' + id, String(Date.now())); } catch (e) {} }
+    }
+    function buildRecent() {
+      recentList.textContent = '';
+      var items = cards.map(function (c) { return { card: c, ts: stamp(c) }; })
+                       .filter(function (x) { return x.ts > 0; })
+                       .sort(function (a, b) { return b.ts - a.ts; });
+      recentEmpty.hidden = items.length > 0;
+      if (!items.length) return;
+      var frag = document.createDocumentFragment();
+      items.forEach(function (it) {
+        var c = it.card.cloneNode(true);
+        c.classList.add('card--recent');
+        var old = c.querySelector('.recent-label');
+        if (old) old.parentNode.removeChild(old);
+        var lab = document.createElement('div');
+        lab.className = 'recent-label';
+        lab.textContent = '最近游玩 · ' + rel(it.ts);
+        var badge = c.querySelector('.badge');
+        if (badge) badge.parentNode.insertBefore(lab, badge.nextSibling); else c.appendChild(lab);
+        var btn = c.querySelector('a.play-btn');
+        if (btn) btn.addEventListener('click', function () { record(btn); });
+        frag.appendChild(c);
+      });
+      recentList.appendChild(frag);
+    }
+
+    function setView(name) {
+      var isRecent = name === 'recent';
+      viewGames.hidden = isRecent;
+      viewRecent.hidden = !isRecent;
+      Array.prototype.forEach.call(tabbar.querySelectorAll('.tab'), function (t) {
+        var on = t.getAttribute('data-view') === name;
+        t.classList.toggle('is-active', on);
+        if (on) t.setAttribute('aria-current', 'page'); else t.removeAttribute('aria-current');
+      });
+      if (isRecent) buildRecent();
+      applyCollapse();
+      try { window.scrollTo(0, 0); } catch (e) {}
+    }
+    Array.prototype.forEach.call(tabbar.querySelectorAll('[data-view]'), function (t) {
+      t.addEventListener('click', function () { setView(t.getAttribute('data-view')); });
+    });
+    $('emptyGo').addEventListener('click', function () { setView('games'); });
+
+    /* 字体反馈：重试重新请求 CDN，关闭仅影响本次会话 */
+    $('fontRetry').addEventListener('click', function () {
+      var link = $('pixelFonts');
+      if (link) {
+        link.href = 'https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap&cb=' + Date.now();
+      }
+      document.documentElement.classList.remove('ui-font-fail');
+    });
+    $('fontDismiss').addEventListener('click', function () {
+      $('fontWarn').classList.add('is-dismissed');
+      try { sessionStorage.setItem('gamehub.fontWarn', '0'); } catch (e) {}
+    });
+    try {
+      if (sessionStorage.getItem('gamehub.fontWarn') === '0') $('fontWarn').classList.add('is-dismissed');
+    } catch (e) {}
+
+    tabbar.hidden = false;
+    applyCollapse();
+    if (location.hash === '#recent') setView('recent');
   })();
   </script>
 </body>

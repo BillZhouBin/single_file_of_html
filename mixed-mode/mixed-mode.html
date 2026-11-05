@@ -6,31 +6,30 @@
 <title>无限竞速混合 · 小游戏合集</title>
 <style>
   :root{
-    --bg0:#070a16; --bg1:#160d2e; --ink:#eaf0ff; --dim:#9aa6d6;
-    --ok:#39e0a0; --bad:#ff5d6c; --gold:#ffd86b; --neon:#7cf0ff;
-    --card:#121a33; --line:rgba(124,240,255,.25);
+    /* 与首页共用同一套深空蓝紫体系，保留绿=达标 / 珊瑚红=未达标的语义 */
+    --bg0:#0a0d1f; --bg1:#121634; --ink:#e6e9f5; --dim:#9aa0c8;
+    --ok:#5ee6a0; --bad:#ff6b5e; --gold:#ffd23f; --neon:#9be7ff;
+    --card:#121634; --line:#2a2f5e;
+    --font-cn:'Noto Sans SC',-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',system-ui,sans-serif;
+    --safe-b:env(safe-area-inset-bottom, 0px);
   }
   *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
   html,body{margin:0;height:100%;}
   body{
-    font-family:'Segoe UI',system-ui,'PingFang SC','Microsoft YaHei',sans-serif;
-    background:
-      radial-gradient(1200px 600px at 50% -10%, #2a1a55 0%, transparent 60%),
-      radial-gradient(800px 500px at 90% 110%, #14324a 0%, transparent 55%),
-      linear-gradient(160deg, var(--bg0), var(--bg1));
+    font-family:var(--font-cn);
+    background:radial-gradient(1200px 600px at 50% -10%, #1a1f47 0%, transparent 60%), var(--bg0);
     color:var(--ink); min-height:100%; display:flex; flex-direction:column;
     align-items:center; padding:18px 14px 40px; overflow-x:hidden;
   }
   .wrap{width:100%; max-width:560px; display:flex; flex-direction:column; gap:18px;}
   .topbar{display:flex; align-items:center; justify-content:space-between; gap:10px;}
-  .brand{font-size:13px; letter-spacing:.18em; color:var(--neon); text-transform:uppercase;}
+  .brand{font-family:ui-monospace,monospace; font-size:10px; letter-spacing:.18em; color:var(--neon); text-transform:uppercase;}
   .stats{display:flex; gap:10px;}
   .chip{background:var(--card); border:1px solid var(--line); border-radius:999px;
     padding:6px 14px; font-size:13px; color:var(--dim);}
   .chip b{color:var(--ink); font-variant-numeric:tabular-nums;}
   h1{margin:2px 0 0; font-size:26px; font-weight:800; letter-spacing:.02em;
-    background:linear-gradient(90deg,var(--neon),var(--gold)); -webkit-background-clip:text;
-    background-clip:text; color:transparent; text-align:center;}
+    color:var(--ink); text-align:center;}
   .sub{text-align:center; color:var(--dim); font-size:13px; margin-top:-6px;}
 
   /* wheel */
@@ -91,20 +90,102 @@
     margin-top:4px; font-weight:700;}
   .modtag.buff{color:var(--ok); background:rgba(57,224,160,.12); border:1px solid rgba(57,224,160,.4);}
   .modtag.debuff{color:var(--bad); background:rgba(255,93,108,.12); border:1px solid rgba(255,93,108,.4);}
+
+  /* ============================================================
+     Mobile-first UI v2 · 与首页共用组件、字号与触控规范
+     约束：#wheel / #svg / #actionBtn / #verdict / 各 overlay ID 与全部 JS 逻辑不变
+     ============================================================ */
+  .chip, .gcard, .verdict, .btn, .panel, .glabel { font-family:var(--font-cn); }
+  /* 图例原为 absolute 压在 verdict 上，改为表盘下方的独立一行，消除窄屏文字重叠 */
+  .gauge { gap:10px; }
+  .glabel {
+    position:static; width:100%; box-sizing:border-box;
+    display:flex; align-items:center; justify-content:space-between; gap:8px;
+    padding:0 6px; font-size:11px; line-height:1.5; pointer-events:none;
+  }
+  .verdict { width:100%; font-size:13px; font-weight:600; line-height:1.5; }
+  .chip .k { color:var(--dim); white-space:nowrap; }
+  .btn { min-height:48px; font-size:15px; border-radius:10px; touch-action:manipulation; }
+  .btn.full { min-height:52px; font-size:16px; }
+  .btn.ghost { min-width:88px; }
+  .overlay { padding:16px; }
+  .panel { border-radius:16px; padding:24px; }
+  .panel .row { gap:10px; }
+  .panel .btn { min-height:48px; }
+  .gauge { border-radius:14px; padding:16px 10px 10px; }
+  .verdict { font-size:13px; }
+  .navbar { display:none; }
+  .section-label { font-size:14px; font-weight:700; color:var(--neon); }
+  .rules { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:0 14px; }
+  .rules summary {
+    min-height:48px; display:flex; align-items:center; justify-content:space-between;
+    cursor:pointer; list-style:none; font-size:14px; font-weight:500;
+  }
+  .rules summary::-webkit-details-marker { display:none; }
+  .rules summary::after { content:'▾'; color:var(--dim); }
+  .rules[open] summary::after { content:'▴'; }
+  .rules p { margin:0 0 14px; font-size:13px; line-height:1.6; color:var(--dim); }
+  button:focus-visible, a:focus-visible, summary:focus-visible {
+    outline:3px solid var(--neon); outline-offset:3px;
+  }
+
+  @media (max-width:720px) {
+    body { padding:12px 16px calc(24px + var(--safe-b)); }
+    .navbar { display:flex; align-items:center; gap:12px; min-height:56px; }
+    .navbar a {
+      width:44px; height:44px; flex:none; display:grid; place-items:center;
+      border:1px solid var(--line); border-radius:10px;
+      color:var(--ink); text-decoration:none; font-size:20px;
+    }
+    .navbar strong { font-size:17px; font-weight:700; }
+    .topbar { display:block; }
+    .topbar .brand, h1 { display:none; }
+    .stats { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; width:100%; }
+    .chip {
+      display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px;
+      padding:8px 4px; border-radius:10px; font-size:11px; text-align:center;
+    }
+    .chip b { font-family:ui-monospace,'VT323',monospace; font-size:24px; line-height:1.1; }
+    .wheel { grid-template-columns:repeat(2,1fr); gap:12px; }
+    .gcard { min-height:100px; padding:12px; border-radius:12px; }
+    .gcard .ic { font-size:26px; }
+    .gcard .nm { font-size:13px; }
+    .gcard .obj { font-size:11px; }
+    .btn.full {
+      position:sticky; bottom:calc(12px + var(--safe-b)); z-index:20;
+      box-shadow:0 12px 28px -10px rgba(0,0,0,.85);
+    }
+    .gauge svg { max-width:100%; }
+    .glabel { padding:0 4px; font-size:11px; }
+    .chip .k { font-size:11px; line-height:1.2; }
+    .panel { padding:20px; }
+    .panel .row { flex-direction:column; }
+    .panel .row .btn { width:100%; }
+  }
+  @media (max-width:360px) {
+    .wheel { gap:8px; }
+    .gcard { padding:10px 8px; }
+    .gcard .nm { font-size:12px; }
+  }
+  @media (prefers-reduced-motion: reduce) { .gcard,.btn { transition:none; } }
 </style>
 </head>
 <body>
 <div class="wrap">
+  <div class="navbar">
+    <a href="../index.html" aria-label="返回合集">←</a>
+    <strong>无限竞速混合</strong>
+  </div>
   <div class="topbar">
     <div class="brand">MIXED · 无限竞速</div>
     <div class="stats">
-      <div class="chip">RUN <b id="runScore">0</b></div>
-      <div class="chip">第 <b id="runRound">1</b> 关</div>
-      <div class="chip">最佳 <b id="runBest">0</b></div>
+      <div class="chip"><span class="k">RUN</span><b id="runScore">0</b></div>
+      <div class="chip"><span class="k">当前关卡</span><b id="runRound">1</b></div>
+      <div class="chip"><span class="k">历史最佳</span><b id="runBest">0</b></div>
     </div>
   </div>
   <h1>无限竞速混合</h1>
-  <div class="sub">固定顺序 1→2→3→4 · 指针停中段绿区=达标（进游戏加 buff）· 未命中跳下一款 · 全未命中随机一款带 debuff</div>
+  <div class="section-label">闯关顺序 1 → 2 → 3 → 4</div>
 
   <div class="wheel" id="wheel"></div>
 
@@ -124,7 +205,11 @@
   </div>
 
   <button class="btn full" id="actionBtn">停止判定</button>
-  <div class="hint">玩法：四款按 1→2→3→4 固定顺序判定 → 指针停在中段随机绿区=达标（进入并加 buff），未命中自动跳下一款 → 若四款全未命中，随机挑一款并施加 debuff 进入 → 完成目标即过关，失败则本轮结束。</div>
+  <details class="rules">
+    <summary>玩法说明 · 展开查看完整规则</summary>
+    <p>四款按 1→2→3→4 固定顺序判定，指针停在中段随机绿区即达标（进入游戏并获得 buff）；未命中自动跳下一款；若四款全未命中，随机挑一款并施加 debuff 进入。完成目标即过关，失败则本轮结束。</p>
+    <p>绿区 = 达标 + buff，红区 = 未达标 → 跳下一款；每关绿区在中段随机定位。可点击表盘、下方按钮或按空格键停止判定。</p>
+  </details>
 </div>
 
 <!-- success overlay -->
