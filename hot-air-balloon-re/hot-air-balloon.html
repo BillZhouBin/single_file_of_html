@@ -248,9 +248,113 @@ function resize() {
   RECT_OVER.x  = (W - BTN_W) / 2;
   RECT_EXIT.x  = (W - BTN_W) / 2;
   RECT_PAUSE.x = PAUSE_X - 16;
+  /* 音效开关：与暂停键同高、位于其左侧，热区不与之重叠 */
+  RECT_SFX.x = W - 188;
 }
 window.addEventListener('resize', resize);
 window.addEventListener('orientationchange', function () { setTimeout(resize, 120); });
+
+/* ---------------- 音效 ----------------
+   纯 Web Audio 实时合成，不引入任何外部音频资源（保持单文件自包含）。
+   策略：首次用户手势时创建/恢复 AudioContext（移动端自动播放限制）；
+   静音状态持久化到独立 key，不触碰 BEST_KEY 与混合模式契约。 */
+var SFX = (function () {
+  var AC = null, master = null;
+  var MUTE_KEY = 'hot_air_balloon_mute_v1';
+  var muted = false;
+  try { muted = localStorage.getItem(MUTE_KEY) === '1'; } catch (e) {}
+
+  function ctxOrNull() {
+    if (AC) {
+      if (AC.state === 'suspended' && AC.resume) { try { AC.resume(); } catch (e) {} }
+      return AC;
+    }
+    var C = window.AudioContext || window.webkitAudioContext;
+    if (!C) return null;
+    try { AC = new C(); } catch (e) { return null; }
+    master = AC.createGain();
+    master.gain.value = 0.14;          /* 总音量保守，避免多层叠加过载 */
+    master.connect(AC.destination);
+    return AC;
+  }
+
+  /* 单音：8ms 起音 + 指数衰减，避免爆音；slideTo 为终止频率 */
+  function tone(freq, dur, type, vol, delay, slideTo) {
+    if (muted) return;
+    var ac = ctxOrNull(); if (!ac) return;
+    var t0 = ac.currentTime + (delay || 0);
+    var osc = ac.createOscillator(), g = ac.createGain();
+    osc.type = type || 'square';
+    osc.frequency.setValueAtTime(freq, t0);
+    if (slideTo) osc.frequency.exponentialRampToValueAtTime(Math.max(1, slideTo), t0 + dur);
+    var v = (vol == null) ? 1 : vol;
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(v, t0 + 0.008);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+    osc.connect(g); g.connect(master);
+    osc.start(t0); osc.stop(t0 + dur + 0.02);
+  }
+
+  /* 低通白噪声：给撞击加一层「闷响」 */
+  function burst(dur, vol, cutoff) {
+    if (muted) return;
+    var ac = ctxOrNull(); if (!ac) return;
+    var n = Math.floor(ac.sampleRate * dur);
+    var buf = ac.createBuffer(1, n, ac.sampleRate);
+    var d = buf.getChannelData(0);
+    for (var i = 0; i < n; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / n);
+    var src = ac.createBufferSource(); src.buffer = buf;
+    var f = ac.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = cutoff || 900;
+    var g = ac.createGain(), t0 = ac.currentTime;
+    g.gain.setValueAtTime(vol, t0);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+    src.connect(f); f.connect(g); g.connect(master);
+    src.start(t0);
+  }
+
+  var lastBubble = 0;
+  return {
+    unlock: function () { if (!muted) ctxOrNull(); },
+    isMuted: function () { return muted; },
+    toggle: function () {
+      muted = !muted;
+      try { localStorage.setItem(MUTE_KEY, muted ? '1' : '0'); } catch (e) {}
+      if (!muted) {
+        ctxOrNull();
+        tone(880, 0.08, 'triangle', 0.7, 0);
+        tone(1318.5, 0.10, 'triangle', 0.6, 0.07);
+      }
+      return muted;
+    },
+    start: function () {
+      tone(523.25, 0.09, 'square', 0.6, 0);
+      tone(783.99, 0.12, 'square', 0.55, 0.08);
+    },
+    bubble: function () {
+      /* 连续拾取时限流，避免多枚气泡音效堆叠成噪音 */
+      var now = (window.performance && performance.now) ? performance.now() : Date.now();
+      if (now - lastBubble < 45) return;
+      lastBubble = now;
+      tone(1046.5, 0.06, 'triangle', 0.5, 0, 1568);
+    },
+    power: function () {
+      tone(659.25, 0.08, 'square', 0.55, 0);
+      tone(880, 0.08, 'square', 0.55, 0.07);
+      tone(1318.5, 0.14, 'square', 0.5, 0.14);
+    },
+    /* 撞击 + 结束三连下行一次排程：挑战局失败会立即跳回混合模式，
+       若拆成两次调用，后一次会被页面卸载截断。 */
+    hit: function () {
+      burst(0.16, 0.8, 700);
+      tone(196, 0.18, 'square', 0.6, 0, 55);
+      tone(392, 0.12, 'square', 0.45, 0.20);
+      tone(294, 0.12, 'square', 0.45, 0.32);
+      tone(196, 0.26, 'square', 0.45, 0.44);
+    },
+    pause: function () { tone(440, 0.05, 'square', 0.35, 0); },
+    exit: function () { tone(659.25, 0.07, 'triangle', 0.5, 0, 440); }
+  };
+})();
 
 /* ---------------- 游戏状态 ---------------- */
 var G = {
@@ -359,6 +463,8 @@ var RECT_READY = { x: (W - BTN_W) / 2, y: READY_BTN_Y, w: BTN_W, h: BTN_H };
 var RECT_OVER  = { x: (W - BTN_W) / 2, y: OVER_BTN_Y,  w: BTN_W, h: BTN_H };
 var RECT_EXIT  = { x: (W - BTN_W) / 2, y: EXIT_Y - 22, w: BTN_W, h: 44 };
 var RECT_PAUSE = { x: PAUSE_X - 16, y: PAUSE_Y - 16, w: 70, h: 60 };
+/* 音效开关热区（世界坐标；76 于 375 屏约合 44 CSS px，满足触控下限） */
+var RECT_SFX   = { x: 0, y: 36, w: 76, h: 76 };
 
 function resetRun() {
   G.time = 0; G.scroll = 0; G.pickScore = 0; G.score = 0;
@@ -524,6 +630,7 @@ function update(dt) {
       addPickScore(BUBBLE_POINT);
       G.poppers.push({ x: e.x, y: e.y, t: 0 });
       bubblesGot++;
+      SFX.bubble();
       if (challenge && challenge.kind === 'bubbles' && bubblesGot >= challenge.target) {
         mmReport('win', 120);
         return;
@@ -542,6 +649,7 @@ function update(dt) {
       G.immune = Math.max(0.5, IMMUNE_TIME + immuneBonus);
       G.gorePhase = 0;                       // 录像实测：彩虹必从「蓝红黄」起
       G.poppers.push({ x: e.x, y: e.y, t: 0, big: true });
+      SFX.power();
     }
   }
 
@@ -570,6 +678,7 @@ function hitBoard(b) {
 function die() {
   G.state = 'over';
   G.shake = 1;
+  SFX.hit();
   if (G.score > G.best) {
     G.best = G.score;
     try { localStorage.setItem(BEST_KEY, String(G.best)); } catch (e) {}
@@ -661,6 +770,35 @@ function drawButton(rect, label) {
   drawText(label, rect.x + rect.w / 2, rect.y + rect.h / 2 + BTN_TXT * 0.36, BTN_TXT, '#ffffff', 'center');
 }
 
+/* 音效开关：喇叭 + 声波 / 静音斜杠（新增 UI，不参与录像复刻定标） */
+function drawSfxIcon() {
+  var cx = W - 150, cy = 74;
+  ctx.save();
+  ctx.fillStyle = COL.hud;
+  ctx.beginPath();
+  ctx.moveTo(cx - 11, cy - 3.5);
+  ctx.lineTo(cx - 5, cy - 3.5);
+  ctx.lineTo(cx + 1, cy - 10);
+  ctx.lineTo(cx + 1, cy + 10);
+  ctx.lineTo(cx - 5, cy + 3.5);
+  ctx.lineTo(cx - 11, cy + 3.5);
+  ctx.closePath();
+  ctx.fill();
+  ctx.strokeStyle = COL.hud;
+  ctx.lineWidth = 2;
+  ctx.lineCap = 'round';
+  if (SFX.isMuted()) {
+    ctx.beginPath();
+    ctx.moveTo(cx + 3, cy + 8);
+    ctx.lineTo(cx + 12, cy - 8);
+    ctx.stroke();
+  } else {
+    ctx.beginPath(); ctx.arc(cx + 2, cy, 6, -0.85, 0.85); ctx.stroke();
+    ctx.beginPath(); ctx.arc(cx + 2, cy, 11, -0.85, 0.85); ctx.stroke();
+  }
+  ctx.restore();
+}
+
 function render() {
   ctx.save();
   ctx.fillStyle = COL.bg;
@@ -706,6 +844,7 @@ function render() {
       drawText('退出', W / 2, EXIT_Y, BTN_TXT, COL.hud, 'center');
     }
   }
+  drawSfxIcon();
   ctx.restore();
 }
 
@@ -728,11 +867,14 @@ function toWorld(clientX, clientY) {
 function inRect(p, r) { return p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h; }
 
 var dragging = false;
-function startGame() { resetRun(); G.state = 'playing'; }
+function startGame() { SFX.unlock(); resetRun(); G.state = 'playing'; SFX.start(); }
 
 function onDown(ev) {
   var t = ev.touches ? ev.touches[0] : ev;
   var p = toWorld(t.clientX, t.clientY);
+
+  SFX.unlock();                                        /* 首次手势解锁音频（移动端自动播放限制） */
+  if (inRect(p, RECT_SFX)) { SFX.toggle(); return; }    /* 音效开关：任何状态都可用 */
 
   if (G.state === 'ready') {
     if (inRect(p, RECT_READY)) startGame();
@@ -740,11 +882,11 @@ function onDown(ev) {
   }
   if (G.state === 'over') {
     if (inRect(p, RECT_OVER)) { startGame(); return; }
-    if (inRect(p, RECT_EXIT)) { G.state = 'ready'; return; }
+    if (inRect(p, RECT_EXIT)) { G.state = 'ready'; SFX.exit(); return; }
     return;
   }
-  if (G.state === 'paused') { G.state = 'playing'; return; }   // 任意位置点击即继续
-  if (inRect(p, RECT_PAUSE)) { G.state = 'paused'; return; }
+  if (G.state === 'paused') { G.state = 'playing'; SFX.pause(); return; }   // 任意位置点击即继续
+  if (inRect(p, RECT_PAUSE)) { G.state = 'paused'; SFX.pause(); return; }
 
   dragging = true;
   G.targetX = p.x;
@@ -780,10 +922,13 @@ window.addEventListener('keydown', function (e) {
     e.preventDefault();
     if (G.state === 'ready') startGame();
     else if (G.state === 'over') startGame();
-    else if (G.state === 'paused') G.state = 'playing';
+    else if (G.state === 'paused') { G.state = 'playing'; SFX.pause(); }
+  } else if (e.key === 'm' || e.key === 'M') {
+    e.preventDefault();
+    SFX.unlock(); SFX.toggle();
   } else if (e.key === 'Escape' || e.key === 'p' || e.key === 'P') {
-    if (G.state === 'playing') G.state = 'paused';
-    else if (G.state === 'paused') G.state = 'playing';
+    if (G.state === 'playing') { G.state = 'paused'; SFX.pause(); }
+    else if (G.state === 'paused') { G.state = 'playing'; SFX.pause(); }
   }
 });
 window.addEventListener('keyup', function (e) {
